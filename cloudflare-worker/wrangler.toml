@@ -1,0 +1,39 @@
+name = "urbangreen-tiles"
+main = "index.js"
+compatibility_date = "2024-12-20"
+account_id = "751ea1abdb3fb6ff7f276b3753e4c6a1"
+workers_dev = true
+
+# Existing KV namespace - we'll use this for data storage
+[[kv_namespaces]]
+binding = "URBANGREEN_KV"
+id = "44bbc911cd8940d3b7a112ebac89ad74"
+
+# Note: Cron triggers also require paid plan
+# For free plan, manually call /refresh when needed
+# [triggers]
+# crons = ["0 */6 * * *"]
+
+[env.development]
+name = "urbangreen-tiles-dev"
+workers_dev = true
+
+[[env.development.kv_namespaces]]
+binding = "URBANGREEN_KV"
+id = "44bbc911cd8940d3b7a112ebac89ad74"
+
+[env.staging]
+name = "urbangreen-tiles-staging"
+workers_dev = true
+
+[[env.staging.kv_namespaces]]
+binding = "URBANGREEN_KV"
+id = "44bbc911cd8940d3b7a112ebac89ad74"
+
+[env.production]
+name = "urbangreen-tiles-prod"
+workers_dev = false
+
+[[env.production.kv_namespaces]]
+binding = "URBANGREEN_KV"
+id = "44bbc911cd8940d3b7a112ebac89ad74"

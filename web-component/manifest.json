@@ -1,0 +1,13 @@
+{
+  "name": "r3gis-urbangreen",
+  "version": "1.0.0",
+  "description": "R3GIS UrbanGreen map web component for Open Data Hub",
+  "main": "r3gis-urbangreen.iife.js",
+  "author": "R3GIS",
+  "odh": {
+    "displayName": "R3GIS UrbanGreen Map",
+    "type": "webcomponent",
+    "tags": ["urbangreen", "greenspaces", "map", "leaflet", "odh", "r3gis"],
+    "configurable": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "r3gis-urbangreen-web-component",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:pmtiles": "vite build --config vite.config.pmtiles.js",
+    "build:all": "npm run build && npm run build:pmtiles",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "maplibre-gl": "^4.7.1",
+    "node-fetch": "^3.3.2",
+    "pmtiles": "^3.2.0",
+    "rbush": "^4.0.1",
+    "supercluster": "^8.0.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}

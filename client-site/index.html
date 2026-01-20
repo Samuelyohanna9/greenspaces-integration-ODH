@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Padova Green Spaces Integration - Open Data Hub</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 60px 40px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            color: #718096;
+            margin-bottom: 40px;
+        }
+
+        .description {
+            color: #4a5568;
+            line-height: 1.8;
+            margin-bottom: 50px;
+            font-size: 1.05rem;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            padding: 40px 30px;
+            color: white;
+            text-decoration: none;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
+        }
+
+        .card-icon {
+            font-size: 3rem;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .card-description {
+            font-size: 0.95rem;
+            opacity: 0.95;
+            line-height: 1.6;
+        }
+
+        .card.live {
+            background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
+        }
+
+        .card.live:hover {
+            box-shadow: 0 15px 40px rgba(76, 175, 80, 0.4);
+        }
+
+        .card.pmtiles {
+            background: linear-gradient(135deg, #2196F3 0%, #1565C0 100%);
+        }
+
+        .card.pmtiles:hover {
+            box-shadow: 0 15px 40px rgba(33, 150, 243, 0.4);
+        }
+
+        .footer {
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 2px solid #e2e8f0;
+            color: #718096;
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Padova Green Spaces</h1>
+        <p class="subtitle">Open Data Hub Integration by R3GIS</p>
+
+        <p class="description">
+            Interactive map visualization of urban green infrastructure in Padova, Italy.
+            Explore vegetation, urban furniture, and management zones with real-time data
+            from the Open Data Hub or optimized PMTiles vector tiles.
+        </p>
+
+        <div class="cards">
+            <a href="index-live.html" class="card live">
+                <div class="card-icon"></div>
+                <div class="card-title">Live API Version</div>
+                <div class="card-description">
+                </div>
+            </a>
+
+            <a href="index-pmtiles.html" class="card pmtiles">
+                <div class="card-icon"></div>
+                <div class="card-title">PMTiles Version</div>
+                <div class="card-description">
+                </div>
+            </a>
+        </div>
+
+        <div class="footer">
+            <p style="margin-top: 10px;">
+                Data for Padova, Italy | Map Visualization Web Component
+            </p>
+        </div>
+    </div>
+</body>
+</html>
