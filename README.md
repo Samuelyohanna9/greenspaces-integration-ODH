@@ -81,20 +81,15 @@ npm run build:all
 
 ```html
 <!-- Live API Version -->
-<r3gis-urbangreen-v2
-  api-base="https://api.tourism.testingmachine.eu"
-  lang="en">
-</r3gis-urbangreen-v2>
+<r3gis-urbangreen-v2 lang="en"></r3gis-urbangreen-v2>
 
 <script src="./web-component/dist/r3gis-urbangreen.iife.js"></script>
 
 <!-- PMTiles Version -->
-<urbangreen-map-pmtiles
-  pmtiles-url="https://your-url.com/urbangreen.pmtiles"
-  language="en">
-</urbangreen-map-pmtiles>
+<urbangreen-map-pmtiles language="en"></urbangreen-map-pmtiles>
 
 <script src="./web-component/dist/r3gis-urbangreen-pmtiles.iife.js"></script>
+
 ```
 
 ## Project Structure
@@ -114,7 +109,7 @@ greenspaces-integration-ODH/
 └── README.md
 ```
 
-## �� Color Standards
+## Color Standards
 
 Colors are based on international urban planning and cartographic standards:
 
