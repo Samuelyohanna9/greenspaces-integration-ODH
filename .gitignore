@@ -34,3 +34,7 @@ tmpclaude-*
 # Large data files (exceed GitHub 100MB limit)
 data/urbangreen-raw.json
 data/urbangreen.geojson
+
+# IDE and tool folders
+.claude/
+.github/
