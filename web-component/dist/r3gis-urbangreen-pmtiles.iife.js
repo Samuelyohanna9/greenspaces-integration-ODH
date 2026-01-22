@@ -18978,7 +18978,7 @@ uniform ${i4} ${a3} u_${s3};
     }
   };
   const DEFAULT_CENTER = [11.8768, 45.4064];
-  const DEFAULT_ZOOM = 12;
+  const DEFAULT_ZOOM = 11;
   const MAIN_TYPES = {
     "1": {
       name: "Vegetation",
@@ -19040,12 +19040,17 @@ uniform ${i4} ${a3} u_${s3};
     render() {
       this.shadowRoot.innerHTML = `
       <style>
+        @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap');
+
         :host {
           display: block;
           width: 100%;
           height: 100%;
           min-height: 400px;
           position: relative;
+          font-family: 'Source Sans Pro', sans-serif;
+          font-size: 16px;
+          color: #212529;
         }
         .wrapper {
           display: flex;
@@ -19053,15 +19058,52 @@ uniform ${i4} ${a3} u_${s3};
           width: 100%;
           height: 100%;
           position: relative;
+          overflow: hidden;
+        }
+        .header-bar {
+          padding: 20px 16px;
+          background: #e8e8e8;
+          border-bottom: none;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .header-bar img {
+          height: 50px;
+          width: auto;
+        }
+        .description-bar {
+          padding: 24px 16px;
+          background: #ffffff;
+          text-align: center;
+          border-bottom: 1px solid #565e64;
+          flex-shrink: 0;
+        }
+        .description-bar h2 {
+          font-family: 'Source Sans Pro', sans-serif;
+          font-size: 24px;
+          font-weight: 700;
+          color: #212529;
+          margin: 0 0 8px 0;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        .description-bar p {
+          font-family: 'Source Sans Pro', sans-serif;
+          font-size: 16px;
+          font-weight: 400;
+          color: #212529;
+          margin: 0;
+          line-height: 1.5;
         }
         .panel {
-          padding: 12px;
-          background: #fafafa;
+          padding: 12px 16px;
+          background: #ffffff;
           display: flex;
           flex-direction: column;
-          gap: 10px;
-          border: 1px solid #ddd;
-          border-bottom: none;
+          gap: 8px;
+          border-bottom: 1px solid #565e64;
           flex-shrink: 0;
         }
         .panel-row {
@@ -19072,33 +19114,40 @@ uniform ${i4} ${a3} u_${s3};
         }
         #mainTypeSelect {
           min-width: 200px;
-          padding: 6px 10px;
-          border: 1px solid #ccc;
+          padding: 6px 12px;
+          border: 1px solid #000000;
           border-radius: 4px;
           background: white;
-          font-size: 14px;
+          font-size: 16px;
+          font-family: 'Source Sans Pro', sans-serif;
+          color: #212529;
         }
         .subcategory-buttons {
           display: flex;
-          gap: 6px;
+          gap: 8px;
           flex-wrap: wrap;
+          min-height: 42px;
         }
         .subcat-btn {
-          padding: 6px 12px;
-          border: 1px solid #ccc;
+          padding: 6px 14px;
+          border: 1px solid #000000;
           border-radius: 4px;
           background: white;
           cursor: pointer;
-          font-size: 13px;
+          font-size: 16px;
+          font-family: 'Source Sans Pro', sans-serif;
+          font-weight: 400;
+          color: #212529;
           transition: all 0.2s;
         }
         .subcat-btn:hover {
-          background: #f0f0f0;
+          background: #000000;
+          color: #ffffff;
         }
         .subcat-btn.active {
-          background: #4CAF50;
+          background: #000000;
           color: white;
-          border-color: #4CAF50;
+          border-color: #000000;
         }
         .subcat-btn:disabled {
           opacity: 0.5;
@@ -19108,13 +19157,14 @@ uniform ${i4} ${a3} u_${s3};
           position: absolute;
           top: 20px;
           right: 20px;
-          background: rgba(255, 255, 255, 0.95);
+          background: #000000;
+          color: #ffffff;
           padding: 6px 12px;
           border-radius: 6px;
           font-size: 11px;
           font-weight: 600;
-          color: #666;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+          font-family: 'Source Sans Pro', sans-serif;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
           z-index: 1;
         }
         #map {
@@ -19122,6 +19172,7 @@ uniform ${i4} ${a3} u_${s3};
           flex: 1;
           min-height: 400px;
           position: relative;
+          will-change: transform;
         }
 
         /* Sidebar styles */
@@ -19137,18 +19188,18 @@ uniform ${i4} ${a3} u_${s3};
 
         .sidebar {
           position: absolute;
-          top: 110px;
+          top: 290px;
           left: -480px;
           width: 380px;
           max-width: 85vw;
-          max-height: 500px;
+          max-height: calc(100vh - 340px);
           background-color: #ffffff;
           box-shadow: 4px 0 16px rgba(0, 0, 0, 0.15);
           pointer-events: auto;
           transition: left 0.3s ease-out;
           overflow-y: auto;
           z-index: 1001;
-          border-radius: 0 16px 16px 0;
+          border-radius: 0 8px 8px 0;
         }
 
         .sidebar.open {
@@ -19156,48 +19207,56 @@ uniform ${i4} ${a3} u_${s3};
         }
 
         .sidebar-header {
-          background: linear-gradient(135deg, #2a8f2a 0%, #4CAF50 100%);
+          background: #ffffff;
           padding: 16px 20px;
           position: relative;
           display: flex;
           align-items: center;
           gap: 12px;
+          border-bottom: 2px solid #000000;
+        }
+
+        .sidebar-header-logo {
+          height: 32px;
+          width: auto;
         }
 
         .sidebar-close {
-          background: rgba(255, 255, 255, 0.95);
-          border: none;
-          font-size: 18px;
+          background: #f3f3f3;
+          border: 1px solid #000000;
+          font-size: 20px;
           width: 32px;
           height: 32px;
           border-radius: 50%;
-          color: #333;
+          color: #000000;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           transition: all 0.2s ease;
           flex-shrink: 0;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
         }
 
         .sidebar-close:hover {
-          background-color: #ffffff;
+          background-color: #000000;
+          color: #ffffff;
           transform: scale(1.05);
         }
 
         .sidebar-title {
-          font-weight: 700;
+          font-family: 'Source Sans Pro', sans-serif;
+          font-weight: 600;
           font-size: 17px;
           margin: 0;
-          color: #ffffff;
+          color: #000000;
           line-height: 1.3;
           flex: 1;
         }
 
         .sidebar-content {
           padding: 24px 20px;
-          font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-family: 'Source Sans Pro', sans-serif;
+          color: #212529;
         }
 
         .sidebar-icon-main {
@@ -19207,7 +19266,7 @@ uniform ${i4} ${a3} u_${s3};
           display: flex;
           align-items: center;
           justify-content: center;
-          background: #f5f5f5;
+          background: #f3f3f3;
           border-radius: 20px;
           padding: 20px;
         }
@@ -19230,17 +19289,17 @@ uniform ${i4} ${a3} u_${s3};
           display: flex;
           align-items: center;
           gap: 6px;
-          background: #f9f9f9;
+          background: #f3f3f3;
           padding: 8px 12px;
           border-radius: 8px;
-          border: 1px solid #e8e8e8;
+          border: 1px solid #565e64;
           white-space: nowrap;
         }
 
         .sidebar-detail-label {
           font-size: 11px;
-          color: #666;
-          font-weight: 500;
+          color: #565e64;
+          font-weight: 600;
           text-transform: uppercase;
           letter-spacing: 0.3px;
         }
@@ -19251,7 +19310,7 @@ uniform ${i4} ${a3} u_${s3};
 
         .sidebar-detail-value {
           font-size: 13px;
-          color: #222;
+          color: #212529;
           font-weight: 600;
         }
 
@@ -19263,21 +19322,22 @@ uniform ${i4} ${a3} u_${s3};
           width: 100%;
           padding: 12px 16px;
           background: #ffffff;
-          border: 2px solid #4CAF50;
-          border-radius: 12px;
-          color: #4CAF50;
+          border: 2px solid #000000;
+          border-radius: 8px;
+          color: #000000;
           font-weight: 600;
-          font-size: 15px;
+          font-size: 16px;
+          font-family: 'Source Sans Pro', sans-serif;
           cursor: pointer;
           transition: all 0.2s ease;
           margin-top: 16px;
         }
 
         .sidebar-nav-btn:hover {
-          background: #4CAF50;
+          background: #000000;
           color: white;
           transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
         .sidebar-nav-btn:hover img {
@@ -19289,31 +19349,76 @@ uniform ${i4} ${a3} u_${s3};
           height: 28px;
           transition: filter 0.2s ease;
         }
+
+        /* Footer */
+        .footer {
+          background: #e8e8e8;
+          padding: 0.5rem 1.5rem;
+          text-align: right;
+          font-size: 80%;
+          border-top: none;
+          position: relative;
+          z-index: 10;
+        }
+        .footer a {
+          color: #212529;
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+          font-family: 'Source Sans Pro', sans-serif;
+          transition: opacity 0.2s;
+        }
+        .footer a:hover {
+          opacity: 0.7;
+        }
+        .footer img {
+          height: 25px;
+          width: auto;
+          display: inline-block;
+          margin-left: 10px;
+        }
       </style>
 
       <div class="wrapper">
+        <div class="header-bar">
+          <img src="../web-component/open-data-hub-icons/Logo_RBG/OpenDataHub_Logo_BK-RGB.svg" alt="Open Data Hub" />
+        </div>
+        <div class="description-bar">
+          <h2>Explore Urban Green Spaces</h2>
+          <p>Discover vegetation, urban furniture, and green infrastructure in Padova. Browse the map and select categories to explore trees, benches, lawns, and more.</p>
+        </div>
         <div class="panel">
           <div class="panel-row">
             <select id="mainTypeSelect">
-              <option value=""> Select main category</option>
-              <option value="1"> Vegetation</option>
-              <option value="2"> Urban Furniture</option>
-              <option value="3"> Use & Management</option>
+              <option value="">Select main category</option>
+              <option value="1">Vegetation</option>
+              <option value="2">Urban Furniture</option>
+              <option value="3">Use & Management</option>
             </select>
-            <div class="badge"> PMTiles</div>
+            <div class="badge">PMTiles</div>
           </div>
           <div class="panel-row subcategory-buttons" id="subcategoryButtons"></div>
         </div>
 
         <div id="map"></div>
+
         <div class="sidebar-overlay">
           <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
-              <button class="sidebar-close" aria-label="Close">←</button>
+              <img src="../web-component/open-data-hub-icons/Logo_RBG/OpenDataHub_Logo_BK-RGB.svg" alt="Open Data Hub" class="sidebar-header-logo" />
               <div class="sidebar-title" id="sidebarTitle"></div>
+              <button class="sidebar-close" aria-label="Close">×</button>
             </div>
             <div class="sidebar-content" id="sidebarContent"></div>
           </div>
+        </div>
+
+        <div class="footer">
+          <a href="https://opendatahub.com" target="_blank">
+            powered by Open Data Hub
+            <img src="../web-component/open-data-hub-icons/Logo_RBG/OpenDataHub_Logo_BK-RGB.svg" alt="Open Data Hub" />
+          </a>
         </div>
       </div>
     `;
