@@ -94,7 +94,7 @@ class UrbanGreenMapPMTiles extends HTMLElement {
           overflow: hidden;
         }
         .header-bar {
-          padding: 20px 16px;
+          padding: 12px 16px;
           background: #e8e8e8;
           border-bottom: none;
           display: flex;
@@ -103,7 +103,7 @@ class UrbanGreenMapPMTiles extends HTMLElement {
           flex-shrink: 0;
         }
         .header-bar img {
-          height: 50px;
+          height: 45px;
           width: auto;
         }
         .description-bar {
