@@ -22,17 +22,17 @@ Interactive web component for visualizing urban green infrastructure in Padova, 
 ## Data Categories
 
 ### Vegetation
-- **Trees & Plants** - Individual trees and plant points (Dark Green: #228B22)
-- **Hedges** - Linear hedge features (Medium Sea Green: #3CB371)
-- **Lawns** - Grass and lawn areas (Light Green: #90EE90)
-- **Flowerbeds** - Garden and flowerbed zones (Bright Green: #7CFC00)
+- **Trees & Plants** - Individual trees and plant points 
+- **Hedges** - Linear hedge features 
+- **Lawns** - Grass and lawn areas 
+- **Flowerbeds** - Garden and flowerbed zones
 
 ### Urban Furniture
-- **Benches** - Seating areas (Sienna Brown: #A0522D)
-- **Waste Bins** - Waste containers (Dim Grey: #696969)
-- **Bollards** - Street bollards (Gold: #FFD700)
-- **Fountains/Hydrants** - Water features (Dodger Blue: #1E90FF)
-- **Shelters & Canopies** - Covered structures (Tan: #D2B48C)
+- **Benches** - Seating areas
+- **Waste Bins** - Waste containers
+- **Bollards** - Street bollards
+- **Fountains/Hydrants** - Water features
+- **Shelters & Canopies** - Covered structures
 
 ### Use & Management
 - Green area boundaries
@@ -108,19 +108,6 @@ greenspaces-integration-ODH/
 │   └── open-data-hub-icons/ # Category icons
 └── README.md
 ```
-
-## Color Standards
-
-Colors are based on international urban planning and cartographic standards:
-
-- **Vegetation**: Green family (#228B22 to #90EE90) - Based on LBCS and OpenStreetMap standards
-- **Urban Furniture**: Brown/Grey family - Standard for street furniture mapping
-- **Water Features**: Blue (#1E90FF) - Universal water element color
-- **High Visibility Items**: Yellow/Gold (#FFD700) - Safety standard for bollards
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
