@@ -18,6 +18,7 @@ Interactive web component for visualizing urban green infrastructure in Padova, 
 - **[Launch Application](https://samuelyohanna9.github.io/greenspaces-integration-ODH/client-site/)**
 - [Live API Version](https://samuelyohanna9.github.io/greenspaces-integration-ODH/client-site/index-live.html)
 - [PMTiles Version](https://samuelyohanna9.github.io/greenspaces-integration-ODH/client-site/index-pmtiles.html)
+- [Hybrid](https://samuelyohanna9.github.io/greenspaces-integration-ODH/client-site/test.html)
 
 ## Data Categories
 
