@@ -1,448 +1,277 @@
 
-import {
-  chooseSpatialStrategy,
-  buildAPIUrl,
-  getTileKey,
-  getOptimalPageSize,
-  getGeometryStrategy,
-  getLayersForZoom,
-  getMaxPagesForZoom
-} from './SpatialQueryUtils.js';
-
-import { TileCache } from './TileCache.js';
-
-const RETRY_DELAY = 1000;
 const MAX_RETRIES = 2;
+const RETRY_DELAY = 500;
+const PAGE_SIZE = 500;
+const PARALLEL_PAGES = 5;
+
+const TYPE_CONFIG = {
+  '1': { name: 'Vegetation', maxPages: 8, loadAll: false },       // ~4,000 items (lawns, trees, hedges)
+  '2': { name: 'Urban Furniture', maxPages: 8, loadAll: false },  // ~4,000 items
+  '3': { name: 'Management', maxPages: 8, loadAll: false }        // ~4,000 polygons
+};
 
 export class ViewportDataLoader {
   constructor(apiBase, lang = 'en') {
     this.apiBase = apiBase;
     this.lang = lang;
     this.endpoint = `${apiBase}/v1/UrbanGreen`;
-
-    this.cache = new TileCache();
-
-    // tileKey -> Promise<Array<Feature>>
-    this.activeRequests = new Map();
-
-    // Shared controller for the current "viewport load"
-    this.viewportAbortController = null;
+    this.abortController = null;
+    this.memoryCache = new Map();
   }
 
-  /**
-   * Abort all in-flight requests for the current viewport
-   */
-  abortAll() {
-    if (this.viewportAbortController) {
-      this.viewportAbortController.abort();
-      this.viewportAbortController = null;
+  abort() {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
     }
   }
 
-  /**
-   * Backwards compat alias
-   */
-  abort() {
-    this.abortAll();
+  abortAll() {
+    this.abort();
   }
 
-  /**
-   * Load data for current viewport using MULTI-LAYER SEMANTIC QUERYING
-   *
-   * @param {LngLatBounds} bounds
-   * @param {number} zoom
-   * @param {string|null} userSelectedType
-   * @param {Object} options
-   * @returns {Promise<Array>} GeoJSON features
-   */
-  async loadViewportData(bounds, zoom, userSelectedType = null, options = {}) {
+ 
+  async loadTypeData(greenCodeType, onProgress = null) {
+    // Check memory cache first
+    if (this.memoryCache.has(greenCodeType)) {
+      const cached = this.memoryCache.get(greenCodeType);
+      console.log(`⚡ Memory cache hit: ${cached.length} features`);
+      return cached;
+    }
+
+    this.abort();
+    this.abortController = new AbortController();
+    const signal = this.abortController.signal;
+
+    const config = TYPE_CONFIG[greenCodeType] || { maxPages: 5, loadAll: false };
+    console.log(`🔄 Loading ${config.name} (type ${greenCodeType})...`);
     const startTime = performance.now();
 
-    this.abortAll();
-    this.viewportAbortController = new AbortController();
-    const signal = this.viewportAbortController.signal;
+  
+    const firstUrl = this._buildUrl(greenCodeType, 1);
+    const firstResult = await this._fetchPage(firstUrl, signal);
 
-    const layersToQuery = getLayersForZoom(zoom, userSelectedType);
-    console.log(
-      `🎯 Loading ${layersToQuery.length} layer(s) at zoom ${zoom.toFixed(1)}: [${layersToQuery.join(', ')}]`
-    );
+    if (!firstResult.success || signal.aborted) {
+      return [];
+    }
 
-    const layerPromises = layersToQuery.map(async (layerType) => {
-      const tileKey = getTileKey(bounds, zoom, layerType);
+    const totalPages = Math.min(firstResult.totalPages, config.maxPages);
+    const allFeatures = this._parseItems(firstResult.items);
 
-      // 1) CACHE (TileCache.get returns Array<Feature> | null)
-      const cachedFeatures = await this.cache.get(tileKey);
-      if (Array.isArray(cachedFeatures)) {
-        console.log(`Cache hit: ${tileKey} (${cachedFeatures.length} features)`);
-        return cachedFeatures;
+    if (onProgress) onProgress(1, totalPages, allFeatures.length);
+    console.log(`📄 Page 1/${totalPages}: ${allFeatures.length} features`);
+
+    if (totalPages > 1 && !signal.aborted) {
+      const remainingPages = [];
+      for (let p = 2; p <= totalPages; p++) {
+        remainingPages.push(p);
       }
 
-      // 2) De-dupe in-flight tile requests
-      if (this.activeRequests.has(tileKey)) {
-        return this.activeRequests.get(tileKey);
+      // Fetch in parallel batches
+      for (let i = 0; i < remainingPages.length; i += PARALLEL_PAGES) {
+        if (signal.aborted) break;
+
+        const batch = remainingPages.slice(i, i + PARALLEL_PAGES);
+        const batchPromises = batch.map(page =>
+          this._fetchPage(this._buildUrl(greenCodeType, page), signal)
+        );
+
+        const batchResults = await Promise.all(batchPromises);
+
+        for (const result of batchResults) {
+          if (result.success) {
+            const features = this._parseItems(result.items);
+            allFeatures.push(...features);
+          }
+        }
+
+        const completedPages = Math.min(i + PARALLEL_PAGES + 1, totalPages);
+        if (onProgress) onProgress(completedPages, totalPages, allFeatures.length);
+        console.log(` Pages ${batch[0]}-${batch[batch.length-1]}/${totalPages}: ${allFeatures.length} total`);
       }
-
-      // 3) Fetch
-      const requestPromise = this._fetchSingleLayer(bounds, zoom, layerType, options, signal)
-        .then((features) => {
-          // If aborted, don't cache partials
-          if (signal.aborted) return [];
-
-          const safeFeatures = Array.isArray(features) ? features : [];
-
-          // Cache result
-          this.cache.set(tileKey, safeFeatures, {
-            bounds: {
-              west: bounds.getWest(),
-              south: bounds.getSouth(),
-              east: bounds.getEast(),
-              north: bounds.getNorth()
-            },
-            zoom,
-            greenCodeType: layerType
-          });
-
-          return safeFeatures;
-        })
-        .catch((err) => {
-          if (err?.name === 'AbortError') return [];
-          console.error(`Failed tile ${tileKey}:`, err);
-          return [];
-        })
-        .finally(() => {
-          this.activeRequests.delete(tileKey);
-        });
-
-      this.activeRequests.set(tileKey, requestPromise);
-      return requestPromise;
-    });
-
-    // Guard: one layer returning non-array must not crash
-    const layerResults = await Promise.all(layerPromises);
-    const allFeatures = layerResults.filter(Array.isArray).flat();
+    }
 
     const elapsed = (performance.now() - startTime).toFixed(0);
-    console.log(
-      `✓ Loaded viewport: ${allFeatures.length} features in ${elapsed}ms (${layersToQuery.length} layers)`
-    );
+    console.log(` Loaded ${allFeatures.length} features in ${elapsed}ms`);
+
+    // Cache in memory
+    if (!signal.aborted && allFeatures.length > 0) {
+      this.memoryCache.set(greenCodeType, allFeatures);
+    }
 
     return allFeatures;
   }
 
-  async _fetchSingleLayer(bounds, zoom, greenCodeType, options, signal) {
-    const strategy = chooseSpatialStrategy(greenCodeType, zoom, bounds);
-    console.log(`Layer ${greenCodeType}: ${strategy.type} query`);
 
-    const maxPages = getMaxPagesForZoom(zoom);
-    return this._fetchViewportData(bounds, zoom, greenCodeType, options, maxPages, signal, strategy);
-  }
-
-  async _fetchViewportData(bounds, zoom, greenCodeType, options, maxPages, signal, strategy) {
-    const pagesize = options.pagesize || getOptimalPageSize(zoom);
-
-    const allFeatures = [];
-    let pageNumber = 1;
-    let hasMore = true;
-
-    try {
-      while (hasMore && pageNumber <= maxPages) {
-        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-        const url = buildAPIUrl(this.endpoint, strategy.params, {
-          language: this.lang,
-          pagesize,
-          pagenumber: pageNumber,
-          greenCodeType,
-          ...options
-        });
-
-        console.log(`Layer ${greenCodeType} page ${pageNumber}...`);
-
-        const pageData = await this._fetchPageWithRetry(url, signal, pageNumber);
-
-        if (!pageData.success) {
-          console.warn(`Layer ${greenCodeType} page ${pageNumber} failed, stopping pagination`);
-          break;
-        }
-
-        const items = Array.isArray(pageData.items) ? pageData.items : [];
-
-        const features = items
-          .map((item) => this._itemToFeature(item, zoom))
-          .filter(Boolean);
-
-        allFeatures.push(...features);
-
-        
-        hasMore = items.length === pagesize;
-        if (!hasMore) break;
-
-        pageNumber++;
-        await new Promise((r) => setTimeout(r, 50));
-      }
-
-      if (pageNumber > maxPages && hasMore) {
-        console.warn(
-          `⚠️ Hit max pages limit (${maxPages} at zoom ${zoom.toFixed(1)}). Zoom in for complete data.`
-        );
-      }
-
-      return allFeatures;
-    } catch (err) {
-      if (err?.name === 'AbortError') return allFeatures;
-      throw err;
+  async loadViewportData(bounds, zoom, greenCodeType = null) {
+    if (greenCodeType) {
+      return this.loadTypeData(greenCodeType);
     }
+    return [];
   }
 
-  async _fetchPageWithRetry(url, signal, pageNumber, retryCount = 0) {
+  _buildUrl(greenCodeType, page) {
+    const url = new URL(this.endpoint);
+
+    // Include Detail field for accurate feature names from API
+    url.searchParams.append('fields', 'Id');
+    url.searchParams.append('fields', 'GreenCodeType');
+    url.searchParams.append('fields', 'GreenCodeSubtype');
+    url.searchParams.append('fields', 'Detail');
+    url.searchParams.append('fields', 'Geo');
+
+    // Pagination
+    url.searchParams.set('pagesize', PAGE_SIZE);
+    url.searchParams.set('pagenumber', page);
+
+    // CORRECT parameter name: greencodetype (not type!)
+    url.searchParams.set('greencodetype', greenCodeType);
+
+    // Only active
+    url.searchParams.set('active', 'true');
+    url.searchParams.set('removenullvalues', 'false');
+
+    return url.toString();
+  }
+
+  async _fetchPage(url, signal, retryCount = 0) {
     try {
-      const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        signal
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) return { success: true, items: [] };
-
-        if (response.status === 500 && retryCount < MAX_RETRIES) {
-          const delay = RETRY_DELAY * Math.pow(2, retryCount);
-          console.warn(`Page ${pageNumber} error 500, retrying in ${delay}ms...`);
-          await new Promise((r) => setTimeout(r, delay));
-          return this._fetchPageWithRetry(url, signal, pageNumber, retryCount + 1);
-        }
-
-        throw new Error(`HTTP ${response.status}`);
-      }
-
+      const response = await fetch(url, { signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const json = await response.json();
-      const items = this._extractItems(json);
-      return { success: true, items };
+      return {
+        success: true,
+        items: json.Items || [],
+        totalPages: json.TotalPages || 1,
+        totalResults: json.TotalResults || 0
+      };
     } catch (err) {
-      if (err?.name === 'AbortError') throw err;
-      console.error(`Page ${pageNumber} fetch failed:`, err?.message || err);
-      return { success: false, items: [] };
+      if (signal.aborted) return { success: false, items: [], totalPages: 0 };
+      if (retryCount < MAX_RETRIES) {
+        await new Promise(r => setTimeout(r, RETRY_DELAY));
+        return this._fetchPage(url, signal, retryCount + 1);
+      }
+      console.error('Fetch error:', err.message);
+      return { success: false, items: [], totalPages: 0 };
     }
   }
 
-  _extractItems(json) {
-    if (Array.isArray(json)) return json;
-    return json?.Items ?? json?.items ?? [];
+  _parseItems(items) {
+    return items.map(item => this._toFeature(item)).filter(Boolean);
   }
 
-  _itemToFeature(item, zoom) {
-    const geoStrategy = getGeometryStrategy(zoom);
-
-    const geometry = this._extractGeometry(item, geoStrategy);
+  _toFeature(item) {
+    const geometry = this._parseGeometry(item);
     if (!geometry) return null;
 
-    const properties = this._extractProperties(item, zoom);
-
-    return { type: 'Feature', geometry, properties };
-  }
-
-  _extractGeometry(item, strategy) {
-    const geoObj = item?.Geo;
-    if (!geoObj) return null;
-
-    const geoArray = Array.isArray(geoObj) ? geoObj : Object.values(geoObj);
-    if (!geoArray.length) return null;
-
-    const geo = geoArray.find((g) => g && g.Default === true) || geoArray[0];
-    if (!geo) return null;
-
-    const wktRaw = geo.Geometry ?? geo.geometry ?? null;
-
-    if (wktRaw) {
-      const geometry = this._parseWKT(wktRaw, strategy);
-      if (geometry) return geometry;
-    }
-
-    const lat = this._toNumber(geo.Latitude ?? item.Latitude);
-    const lng = this._toNumber(geo.Longitude ?? item.Longitude);
-
-    if (lat !== null && lng !== null) {
-      return { type: 'Point', coordinates: this._reduceCoordinatePrecision([lng, lat]) };
-    }
-
-    return null;
-  }
-
-  _parseWKT(wktString, strategy) {
-    const cleaned = String(wktString).replace(/;SRID=\d+\s*$/i, '').trim();
-
-    // POINT
-    const pointMatch = cleaned.match(/POINT\s*\(\s*([-\d.,]+)\s+([-\d.,]+)\s*\)/i);
-    if (pointMatch) {
-      const lng = this._toNumber(pointMatch[1]);
-      const lat = this._toNumber(pointMatch[2]);
-      if (lng !== null && lat !== null) {
-        return { type: 'Point', coordinates: this._reduceCoordinatePrecision([lng, lat]) };
-      }
-    }
-
-    // LINESTRING
-    const lineMatch = cleaned.match(/LINESTRING\s*\(\s*(.+)\s*\)\s*$/i);
-    if (lineMatch && strategy.includeFullGeometry) {
-      const coords = this._parseCoordList(lineMatch[1]);
-      if (coords && coords.length >= 2) {
-        const reduced = this._reduceCoordinatePrecision(coords);
-        return { type: 'LineString', coordinates: reduced };
-      }
-    }
-
-    // POLYGON 
-    const polyMatch = cleaned.match(/POLYGON\s*\(\s*\((.+)\)\s*\)\s*$/i);
-
-    if (polyMatch && strategy.includeFullGeometry) {
-      const coords = this._parseCoordList(polyMatch[1]);
-      if (coords && coords.length >= 3) {
-        const simplified = this._simplifyPolygon([coords], strategy.simplificationTolerance);
-        const reduced = this._reduceCoordinatePrecision(simplified);
-        return { type: 'Polygon', coordinates: reduced };
-      }
-    }
-
-    // Low zoom: centroid
-    if (polyMatch && !strategy.includeFullGeometry) {
-      const coords = this._parseCoordList(polyMatch[1]);
-      if (coords && coords.length >= 3) {
-        const centroid = this._calculateCentroid(coords);
-        return { type: 'Point', coordinates: this._reduceCoordinatePrecision(centroid) };
-      }
-    }
-
-    return null;
-  }
-
-  _parseCoordList(str) {
-    const parts = String(str).trim().split(',').map((p) => p.trim()).filter(Boolean);
-    const coords = [];
-
-    for (const part of parts) {
-      const [lngStr, latStr] = part.split(/\s+/);
-      const lng = this._toNumber(lngStr);
-      const lat = this._toNumber(latStr);
-      if (lng !== null && lat !== null) coords.push([lng, lat]);
-    }
-
-    return coords.length ? coords : null;
-  }
-
-  _simplifyPolygon(rings, tolerance) {
-    return rings.map((ring) => {
-      if (ring.length < 4) return ring;
-      return this._douglasPeucker(ring, tolerance);
-    });
-  }
-
-  _douglasPeucker(points, tolerance) {
-    if (points.length <= 2) return points;
-
-    let maxDistance = 0;
-    let maxIndex = 0;
-    const first = points[0];
-    const last = points[points.length - 1];
-
-    for (let i = 1; i < points.length - 1; i++) {
-      const distance = this._perpendicularDistance(points[i], first, last);
-      if (distance > maxDistance) {
-        maxDistance = distance;
-        maxIndex = i;
-      }
-    }
-
-    if (maxDistance > tolerance) {
-      const left = this._douglasPeucker(points.slice(0, maxIndex + 1), tolerance);
-      const right = this._douglasPeucker(points.slice(maxIndex), tolerance);
-      return left.slice(0, -1).concat(right);
-    }
-
-    return [first, last];
-  }
-
-  _perpendicularDistance(point, lineStart, lineEnd) {
-    const [x, y] = point;
-    const [x1, y1] = lineStart;
-    const [x2, y2] = lineEnd;
-
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-
-    if (dx === 0 && dy === 0) return Math.sqrt((x - x1) ** 2 + (y - y1) ** 2);
-
-    const numerator = Math.abs(dy * x - dx * y + x2 * y1 - y2 * x1);
-    const denominator = Math.sqrt(dx * dx + dy * dy);
-
-    return numerator / denominator;
-  }
-
-  _calculateCentroid(coords) {
-    const x = coords.reduce((sum, c) => sum + c[0], 0) / coords.length;
-    const y = coords.reduce((sum, c) => sum + c[1], 0) / coords.length;
-    return [x, y];
-  }
-
-  _reduceCoordinatePrecision(coords, decimals = 6) {
-    const factor = Math.pow(10, decimals);
-
-    if (typeof coords[0] === 'number') {
-      return coords.map((c) => Math.round(c * factor) / factor);
-    }
-    return coords.map((c) => this._reduceCoordinatePrecision(c, decimals));
-  }
-
-  _extractProperties(item, zoom) {
-    
-    const baseProps = {
-      id: item.Id,
-      greenCodeType: String(item.GreenCodeType || ''),
-      greenCodeSubtype: String(item.GreenCodeSubtype || ''),
-      greenCode: item.GreenCode || 'N/A',
-      isActive: item.Active || false
-    };
-
-    if (zoom < 12) return baseProps;
-
-    if (zoom < 15) {
-      return {
-        ...baseProps,
-        title: this._getLocalizedTitle(item)
-      };
+  
+    const detail = item.Detail;
+    let name = null;
+    if (detail) {
+  
+      if (detail.en?.Title) name = detail.en.Title;
+      else if (detail.it?.Title) name = detail.it.Title;
+      else if (detail.de?.Title) name = detail.de.Title;
     }
 
     return {
-      ...baseProps,
-      title: this._getLocalizedTitle(item),
-      active: item.Active ? 'Yes' : 'No',
-      shortname: item.Shortname || ''
+      type: 'Feature',
+      geometry,
+      properties: {
+        id: item.Id,
+        greenCodeType: String(item.GreenCodeType || ''),
+        greenCodeSubtype: String(item.GreenCodeSubtype || ''),
+        name: name  // Actual feature name from API
+      }
     };
   }
 
-  _getLocalizedTitle(item) {
-    const detail = item?.Detail;
-    if (!detail || typeof detail !== 'object') return item?.Shortname || item?.Id || 'Unknown';
+  _parseGeometry(item) {
+    const geoObj = item.Geo;
+    if (!geoObj) return null;
 
-    if (detail[this.lang]?.Title) return detail[this.lang].Title;
-    if (detail.en?.Title) return detail.en.Title;
+    const geoArray = Array.isArray(geoObj) ? geoObj : Object.values(geoObj);
+    const geo = geoArray.find(g => g?.Default) || geoArray[0];
+    if (!geo) return null;
 
-    for (const v of Object.values(detail)) {
-      if (v?.Title) return v.Title;
+    const wkt = geo.Geometry || geo.geometry;
+    if (!wkt) return null;
+
+    return this._parseWKT(wkt);
+  }
+
+  _parseWKT(wkt) {
+    const str = String(wkt).trim();
+
+    // POINT
+    const pointMatch = str.match(/POINT\s*\(\s*([-\d.]+)\s+([-\d.]+)\s*\)/i);
+    if (pointMatch) {
+      const lng = +pointMatch[1];
+      const lat = +pointMatch[2];
+      if (!this._validCoord(lng, lat)) return null;
+      return { type: 'Point', coordinates: [lng, lat] };
     }
 
-    return item?.Shortname || item?.Id || 'Unknown';
+    // LINESTRING
+    const lineMatch = str.match(/LINESTRING\s*\((.+)\)/i);
+    if (lineMatch) {
+      const coords = this._parseCoords(lineMatch[1]);
+      if (coords && coords.length >= 2 && this._validCoords(coords)) {
+        return { type: 'LineString', coordinates: coords };
+      }
+    }
+
+    // POLYGON
+    const polyMatch = str.match(/POLYGON\s*\(\s*\((.+)\)\s*\)/i);
+    if (polyMatch) {
+      const coords = this._parseCoords(polyMatch[1]);
+      if (coords && coords.length >= 3 && this._validCoords(coords)) {
+        // Ensure closed
+        if (coords[0][0] !== coords[coords.length-1][0] ||
+            coords[0][1] !== coords[coords.length-1][1]) {
+          coords.push([...coords[0]]);
+        }
+        // Skip oversized
+        if (!this._validPolygonSize(coords)) return null;
+        return { type: 'Polygon', coordinates: [coords] };
+      }
+    }
+
+    return null;
   }
 
-  _toNumber(v) {
-    if (v === null || v === undefined) return null;
-    const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
+  _parseCoords(str) {
+    return str.split(',').map(p => {
+      const [x, y] = p.trim().split(/\s+/).map(Number);
+      return [x, y];
+    });
   }
 
-  async clearCache() {
-    await this.cache.clear();
+  _validCoord(lng, lat) {
+    return lng >= 10 && lng <= 13 && lat >= 44 && lat <= 47;
   }
 
-  async getCacheStats() {
-    return this.cache.getStats();
+  _validCoords(coords) {
+    for (const [lng, lat] of coords) {
+      if (!this._validCoord(lng, lat)) return false;
+    }
+    return true;
+  }
+
+  _validPolygonSize(coords) {
+    let minLng = Infinity, maxLng = -Infinity;
+    let minLat = Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of coords) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    return (maxLng - minLng) < 0.1 && (maxLat - minLat) < 0.1;
+  }
+
+  clearCache() {
+    this.memoryCache.clear();
+    console.log('🗑️ Memory cache cleared');
   }
 }

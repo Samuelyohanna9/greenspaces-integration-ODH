@@ -1,77 +1,254 @@
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import * as pmtiles from "pmtiles";
 import Supercluster from "supercluster";
 import { ViewportDataLoader } from "./ViewportDataLoader.js";
+import { getGreenSpaceInfo } from "./GreenSpaceDictionary.js";
 
-const DEFAULT_CENTER = [11.8768, 45.4064];
-const DEFAULT_ZOOM = 11;
-const MAP_MOVE_DEBOUNCE = 250;
-
-const CLUSTER_RADIUS = 60;
-const CLUSTER_MAX_ZOOM = 16;
+const DEFAULT_CENTER = [11.8768, 45.4064]; // Padova
+const DEFAULT_ZOOM = 13;
+const DEBOUNCE_MS = 300;
+const LIVE_ZOOM_IN = 14.5;
+const LIVE_ZOOM_OUT = 13.5;
+const PMTILES_DEFAULT_URL = "https://pub-6af0cab720894f57a27ad4199ce3ffa3.r2.dev/urbangreen.pmtiles";
+const PMTILES_SOURCE = "pmtiles";
+const PMTILES_SOURCE_LAYER = "urbangreen";
 
 const MAIN_TYPES = {
   "1": {
     name: "Vegetation",
     color: "#4CAF50",
     subcategories: {
-      "trees": { name: "Trees & Plants", subtypes: ["03"], geometries: ["Point"], icon: "ic-trees.svg", color: "#228B22" },
-      "hedges": { name: "Hedges", subtypes: ["03"], geometries: ["LineString"], icon: "hedge.svg", color: "#3CB371" },
-      "lawns": { name: "Lawns", subtypes: ["01"], icon: "lawn.svg", color: "#90EE90" },
-      "flowerbeds": { name: "Flowerbeds", subtypes: ["02"], icon: "flowerbed.svg", color: "#7CFC00" }
+      "all": {
+        name: "All Vegetation",
+        subtypes: null,
+        geometries: null,
+        color: "#4CAF50",
+        multiColor: true,
+        tooltip: "Trees, shrubs, hedges, lawns, flowerbeds, and ground cover"
+      },
+      "trees": {
+        name: "Trees & Plants",
+        subtypes: ["03"],
+        geometries: ["Point"],
+        icon: "ic-trees.svg",
+        color: "#228B22",
+        tooltip: "Individual trees, shrubs, and plant groups"
+      },
+      "hedges": {
+        name: "Hedges & Roadsides",
+        subtypes: ["03"],
+        geometries: ["LineString"],
+        icon: "hedge.svg",
+        color: "#3CB371",
+        tooltip: "Hedges, roadside vegetation, and tree lines"
+      },
+      "lawns": {
+        name: "Lawns & Ground",
+        subtypes: ["01"],
+        geometries: ["Polygon"],
+        icon: "lawn.svg",
+        color: "#90EE90",
+        tooltip: "Grass lawns, bare ground, green road banks, meadows"
+      },
+      "flowerbeds": {
+        name: "Flowerbeds",
+        subtypes: ["02"],
+        geometries: ["Polygon"],
+        icon: "flowerbed.svg",
+        color: "#FF69B4",
+        tooltip: "Flowerbeds, perennial beds, grated flowerbeds"
+      }
     }
   },
   "2": {
     name: "Urban Furniture",
     color: "#8D6E63",
     subcategories: {
-      "benches": { name: "Benches", subtypes: ["19"], icon: "bench.svg", color: "#A0522D" },
-      "bins": { name: "Waste bins", subtypes: ["24"], icon: "waste-bin.svg", color: "#696969" },
-      "bollards": { name: "Bollards", subtypes: ["14"], icon: "bollard.svg", color: "#FFD700" },
-      "fountains": { name: "Fountains / Hydrants", subtypes: ["22", "23"], icon: "fountain.svg", color: "#1E90FF" },
-      "shelters": { name: "Shelters & Canopies", subtypes: ["13"], icon: "canopy.svg", color: "#D2B48C" }
+      // Grouped subcategories for better UX (6 groups instead of 14)
+      "all": {
+        name: "All Furniture",
+        subtypes: null,
+        geometries: null,
+        color: "#8D6E63",
+        multiColor: true,
+        tooltip: "All urban furniture and infrastructure elements"
+      },
+      "street": {
+        name: "Street Furniture",
+        subtypes: ["14", "19", "24"],
+        geometries: null,
+        icon: "bench.svg",
+        color: "#A0522D",
+        tooltip: "Benches, litter bins, bollards, planters, bike racks, streetlamps, play equipment"
+      },
+      "boundaries": {
+        name: "Boundaries",
+        subtypes: ["15", "16", "17", "18"],
+        geometries: ["LineString"],
+        icon: null,
+        color: "#8B4513",
+        tooltip: "Walls, fences, gates, guardrails, kerbs"
+      },
+      "ground": {
+        name: "Ground Surfaces",
+        subtypes: ["05", "31", "42"],
+        geometries: ["Polygon", "LineString"],
+        icon: null,
+        color: "#FF5722",
+        tooltip: "Paving, stairs, ramps, safety surfacing"
+      },
+      "utilities": {
+        name: "Utilities",
+        subtypes: ["20", "21", "23", "32"],
+        geometries: null,
+        icon: null,
+        color: "#607D8B",
+        tooltip: "Manholes, hydrants, drainage pipes, irrigation systems"
+      },
+      "structures": {
+        name: "Water & Structures",
+        subtypes: ["04", "13", "22"],
+        geometries: null,
+        icon: null,
+        color: "#03A9F4",
+        tooltip: "Drinking fountains, water features, buildings, monuments, canopies"
+      }
     }
   },
   "3": {
     name: "Use & Management",
     color: "#2196F3",
     subcategories: {
-      "boundary": { name: "Green area boundary", subtypes: ["25"] },
-      "usage": { name: "Usage zones", subtypes: ["27"] },
-      "temporary": { name: "Temporary areas", subtypes: ["26"] }
+      "all": {
+        name: "All Areas",
+        subtypes: null,
+        geometries: ["Polygon"],
+        color: "#2196F3",
+        multiColor: true,
+        tooltip: "Management areas, activity zones, and temporary sites"
+      },
+      "boundary": {
+        name: "Management Areas",
+        subtypes: ["25"],
+        geometries: ["Polygon"],
+        icon: null,
+        color: "#64B5F6",
+        tooltip: "Green area boundaries and management zones"
+      },
+      "playground": {
+        name: "Playgrounds & Sports",
+        subtypes: ["27"],
+        geometries: ["Polygon"],
+        icon: null,
+        color: "#FF6347",
+        tooltip: "Playgrounds, sports areas, dog parks, community gardens"
+      },
+      "temporary": {
+        name: "Construction Sites",
+        subtypes: ["26"],
+        geometries: ["Polygon"],
+        icon: null,
+        color: "#FFB74D",
+        tooltip: "Active construction and temporary work zones"
+      }
     }
   }
 };
+
+
+const SUBTYPE_COLORS = {
+  // Vegetation (Type 1)
+  "01": "#90EE90",  // Lawns & Ground - light green
+  "02": "#FF69B4",  // Flowerbeds - hot pink
+  "03": "#228B22",  // Trees/Shrubs/Hedges - forest green
+  // Urban Furniture (Type 2) - based on API data analysis
+  "04": "#03A9F4",  // Water features - light blue
+  "05": "#FF5722",  // Paving - deep orange
+  "08": "#9E9E9E",  // Roller rink - gray
+  "09": "#81C784",  // Football pitch - light green
+  "10": "#81C784",  // Futsal pitch - light green
+  "11": "#81C784",  // Sport facility - light green
+  "12": "#795548",  // Building - brown
+  "13": "#9E9E9E",  // Structures (construction, canopy, monument) - gray
+  "14": "#FFD700",  // Urban furniture points (bollards, planters, bike rack, etc.) - gold
+  "15": "#795548",  // Walls - brown
+  "16": "#E91E63",  // Kerbs - pink
+  "17": "#8B4513",  // Fences - saddle brown
+  "18": "#8B4513",  // Gates - saddle brown
+  "19": "#A0522D",  // Benches (lines) - sienna
+  "20": "#607D8B",  // Drainage - blue gray
+  "21": "#607D8B",  // Manholes - blue gray
+  "22": "#1E90FF",  // Drinking fountains - dodger blue
+  "23": "#F44336",  // Hydrants - red
+  "24": "#2E7D32",  // Litter bins - green
+  "28": "#795548",  // Bicycle path - brown
+  "31": "#BCAAA4",  // Stairs/Ramps - light brown
+  "32": "#03A9F4",  // Irrigation - light blue
+  "34": "#D84315",  // Tennis court - deep orange
+  "37": "#616161",  // Running track - dark gray
+  "42": "#FF9800",  // Safety surfacing - orange
+  // Management (Type 3)
+  "25": "#64B5F6",  // Management areas - light blue
+  "26": "#FFB74D",  // Construction sites - orange
+  "27": "#FF6347"   // Playgrounds/Sports/Dogs areas - tomato
+};
+
+const LIVE_LAYER_IDS = [
+  "polygons-fill",
+  "polygons-outline",
+  "polygons-outline-outer",
+  "lines-outer",
+  "lines",
+  "clusters",
+  "cluster-count",
+  "points"
+];
+
+const PM_LAYER_IDS = [
+  "pm-polygons-fill",
+  "pm-polygons-outline",
+  "pm-polygons-outline-outer",
+  "pm-lines-outer",
+  "pm-lines",
+  "pm-points"
+];
 
 class UrbanGreenMapV2 extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-
     this.map = null;
-    this.dataLoader = null;
+    this.loader = null;
+    this.cluster = null;
+    this.currentType = null;
+    this.currentSubCategory = null;
+    this.debounceTimer = null;
+    this._seq = 0;
+    this._currentFeatures = null;
+    this._dataMode = "live";
+    this._featureClicked = false;
+    this.pmtilesUrl = null;
+    this.pmtilesReady = false;
+    this.pmtilesArchive = null;
+    this.pmtilesProtocol = null;
+    this._pmAllowedGeometries = null;
+    this._pmHasCategory = false;
+    this._pmSubtypeColorExpr = null;
 
-    this.layerData = { "1": [], "2": [], "3": [] };
-    this.clusterIndex = { "1": null, "2": null }; 
-
-    this.currentMainType = null;
-    this.currentSubcategory = null;
-    this.moveDebounceTimer = null;
-    this._requestSeq = 0;
-    this._handlersBound = false;
-
-    this._sidebar = null;
-    this._sidebarContent = null;
+    this._pmGreenCodeExpr = ["to-string", ["coalesce", ["get", "greenCode"], ["get", "code"], ""]];
+    this._pmTypeExpr = ["to-string", ["coalesce", ["get", "greenCodeType"], ["get", "type"], ["slice", this._pmGreenCodeExpr, 1, 2]]];
+    this._pmSubtypeExpr = ["slice", this._pmGreenCodeExpr, 2, 4];
   }
 
   connectedCallback() {
-    this.renderLayout();
+    this.pmtilesUrl = this.getAttribute("pmtiles-url") || PMTILES_DEFAULT_URL;
+    this.render();
     this.initMap();
   }
 
   disconnectedCallback() {
-    this.closeSidebar();
-    this.dataLoader?.abortAll();
+    this.loader?.abort();
     this.map?.remove();
   }
 
@@ -83,385 +260,148 @@ class UrbanGreenMapV2 extends HTMLElement {
     return this.getAttribute("lang") || "en";
   }
 
-  /* ================= UI ================= */
+  get liveZoomIn() {
+    const val = parseFloat(this.getAttribute("live-zoom-in"));
+    return Number.isFinite(val) ? val : LIVE_ZOOM_IN;
+  }
 
-  renderLayout() {
+  get liveZoomOut() {
+    const val = parseFloat(this.getAttribute("live-zoom-out"));
+    return Number.isFinite(val) ? val : LIVE_ZOOM_OUT;
+  }
+
+  render() {
     this.shadowRoot.innerHTML = `
       <style>
-        @import url('https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@400;600;700&display=swap');
+        :host { display: block; width: 100%; height: 100%; font-family: system-ui, sans-serif; }
+        .container { display: flex; flex-direction: column; height: 100%; }
+        .header { padding: 12px; background: #f5f5f5; text-align: center; border-bottom: 1px solid #ddd; }
+        .header img { height: 40px; }
+        .title { padding: 16px; text-align: center; background: #fff; }
+        .title h2 { margin: 0 0 8px; font-size: 20px; text-transform: uppercase; }
+        .title p { margin: 0; color: #666; font-size: 14px; }
+        .controls { padding: 12px; background: #fff; border-bottom: 1px solid #ddd; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        select { min-width: 160px; padding: 8px 12px; border: 1px solid #333; border-radius: 4px; font-size: 14px; }
+        button { padding: 8px 16px; border: 1px solid #333; border-radius: 4px; background: #fff; cursor: pointer; }
+        button:hover { background: #333; color: #fff; }
 
-        :host {
-          display: block;
-          width: 100%;
-          height: 100%;
-          min-height: 400px;
-          position: relative;
-          font-family: 'Source Sans Pro', sans-serif;
-          font-size: 16px;
-          color: #212529;
-        }
-        .wrapper {
-          display: flex;
-          flex-direction: column;
-          width: 100%;
-          height: 100%;
-          position: relative;
-          overflow: hidden;
-        }
-        .header-bar {
-          padding: 12px 16px;
-          background: #e8e8e8;
-          border-bottom: none;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .header-bar img {
-          height: 45px;
-          width: auto;
-        }
-        .description-bar {
-          padding: 24px 16px;
-          background: #ffffff;
-          text-align: center;
-          border-bottom: 1px solid #565e64;
-          flex-shrink: 0;
-        }
-        .description-bar h2 {
-          font-family: 'Source Sans Pro', sans-serif;
-          font-size: 24px;
-          font-weight: 700;
-          color: #212529;
-          margin: 0 0 8px 0;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-        .description-bar p {
-          font-family: 'Source Sans Pro', sans-serif;
-          font-size: 16px;
-          font-weight: 400;
-          color: #212529;
-          margin: 0;
-          line-height: 1.5;
-        }
-        .panel {
-          padding: 12px 16px;
-          background: #ffffff;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          border-bottom: 1px solid #565e64;
-          flex-shrink: 0;
-        }
-        .panel-row {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-          flex-wrap: wrap;
-        }
-        #mainTypeSelect {
-          min-width: 200px;
-          padding: 6px 12px;
-          border: 1px solid #000000;
-          border-radius: 4px;
-          background: white;
-          font-size: 16px;
-          font-family: 'Source Sans Pro', sans-serif;
-          color: #212529;
-        }
-        .subcategory-buttons {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-          min-height: 42px;
-        }
-        .subcat-btn {
-          padding: 6px 14px;
-          border: 1px solid #000000;
-          border-radius: 4px;
-          background: white;
-          cursor: pointer;
-          font-size: 16px;
-          font-family: 'Source Sans Pro', sans-serif;
-          font-weight: 400;
-          color: #212529;
-          transition: all 0.2s;
-        }
-        .subcat-btn:hover {
-          background: #000000;
-          color: #ffffff;
-        }
-        .subcat-btn.active {
-          background: #000000;
-          color: white;
-          border-color: #000000;
-        }
-        .subcat-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        #clearCache {
-          padding: 8px 16px;
-          border: 1px solid #000000;
-          border-radius: 4px;
-          background: white;
-          cursor: pointer;
-          font-size: 16px;
-          font-family: 'Source Sans Pro', sans-serif;
-          color: #212529;
-        }
-        #clearCache:hover {
-          background: #000000;
-          color: #ffffff;
-        }
-        #map {
-          width: 100%;
-          flex: 1;
-          min-height: 400px;
-          position: relative;
-          will-change: transform;
-        }
+        /* Chip container for sub-categories */
+        .chip-container { display: none; gap: 6px; flex-wrap: wrap; align-items: center; }
+        .chip-container.show { display: flex; }
+        .chip-divider { width: 1px; height: 24px; background: #ddd; margin: 0 4px; }
 
-        /* Sidebar styles */
-        .sidebar-overlay {
-          position: absolute;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          pointer-events: none;
-          z-index: 1000;
-        }
+        /* Chip/pill buttons - uses CSS custom property for color */
+        .chip { position: relative; padding: 6px 14px; border: 1px solid var(--chip-color, #4CAF50); border-radius: 20px; background: #fff;
+                color: var(--chip-color, #4CAF50); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        .chip:hover { background: color-mix(in srgb, var(--chip-color, #4CAF50) 15%, white); }
+        .chip.active { background: var(--chip-color, #4CAF50); color: #fff; }
+        .chip.active:hover { filter: brightness(0.9); }
 
-        .sidebar {
-          position: absolute;
-          top: 290px;
-          left: -480px;
-          width: 380px;
-          max-width: 85vw;
-          max-height: calc(100vh - 340px);
-          background-color: #ffffff;
-          box-shadow: 4px 0 16px rgba(0, 0, 0, 0.15);
-          pointer-events: auto;
-          transition: left 0.3s ease-out;
-          overflow-y: auto;
-          z-index: 1001;
-          border-radius: 0 8px 8px 0;
-        }
+        /* Chip tooltip on hover */
+        .chip-tooltip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+                        background: #333; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 12px;
+                        font-weight: 400; white-space: normal; width: max-content; max-width: 220px; text-align: center;
+                        opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s; z-index: 100;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.2); line-height: 1.4; }
+        .chip-tooltip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+                               border: 6px solid transparent; border-top-color: #333; }
+        .chip:hover .chip-tooltip { opacity: 1; visibility: visible; }
+        .footer { padding: 16px 20px; background: #f5f5f5; display: flex; justify-content: flex-end; align-items: center; gap: 10px; position: relative; z-index: 10; }
+        .footer a { display: inline-flex; align-items: center; gap: 10px; color: #0066cc; text-decoration: none; font-size: 14px; font-weight: 500; cursor: pointer; position: relative; z-index: 11; }
+        .footer a:hover { text-decoration: underline; color: #004499; }
+        .footer img { height: 32px; width: auto; }
 
-        .sidebar.open {
-          left: 0;
-        }
+        /* Map wrapper for sidebar positioning */
+        .map-wrapper { position: relative; flex: 1; min-height: 400px; }
+        .map-wrapper #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
 
-        .sidebar-header {
-          background: #ffffff;
-          padding: 16px 20px;
-          position: relative;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          border-bottom: 2px solid #000000;
-        }
+        .sidebar { position: absolute; top: 12px; left: -340px; width: 300px; max-height: calc(100% - 24px);
+                   background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+                   transition: left 0.3s ease; z-index: 1000; overflow: hidden; display: flex; flex-direction: column; }
+        .sidebar.open { left: 12px; }
+        .sidebar-header { padding: 8px 12px; background: #fff; display: flex; justify-content: flex-end; align-items: center;
+                          border-bottom: 1px solid #eee; flex-shrink: 0; }
+        .sidebar-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #999; padding: 4px 8px; line-height: 1; }
+        .sidebar-close:hover { color: #333; }
+        .sidebar-content { padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; flex: 1; }
 
-        .sidebar-header-logo {
-          height: 32px;
-          width: auto;
-        }
+        /* Icon card at top */
+        .sidebar-icon { width: 100%; aspect-ratio: 1.2; max-height: 120px; background: #f8f8f8; border-radius: 12px;
+                        display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+        .sidebar-icon img { max-width: 70px; max-height: 70px; object-fit: contain; }
+        .sidebar-icon.empty { display: none; }
 
-        .sidebar-close {
-          background: #f3f3f3;
-          border: 1px solid #000000;
-          font-size: 20px;
-          width: 32px;
-          height: 32px;
-          border-radius: 50%;
-          color: #000000;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.2s ease;
-          flex-shrink: 0;
-        }
+        /* Info pills/badges */
+        .info-pill { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; background: #fff;
+                     border-radius: 24px; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .info-pill-label { color: #666; text-transform: uppercase; font-size: 11px; font-weight: 500; }
+        .info-pill-value { color: #333; font-weight: 600; }
+        .info-pills-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
-        .sidebar-close:hover {
-          background-color: #000000;
-          color: #ffffff;
-          transform: scale(1.05);
-        }
+        /* Directions button */
+        .directions-btn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%;
+                          padding: 12px 20px; background: #fff; border: 2px solid #333; border-radius: 28px;
+                          font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 8px; transition: all 0.2s; }
+        .directions-btn:hover { background: #f5f5f5; }
+        .directions-btn img { width: 32px; height: 32px; }
 
-        .sidebar-title {
-          font-family: 'Source Sans Pro', sans-serif;
-          font-weight: 600;
-          font-size: 17px;
-          margin: 0;
-          color: #000000;
-          line-height: 1.3;
-          flex: 1;
-        }
+        .toast { position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+                 background: #333; color: #fff; padding: 10px 20px; border-radius: 4px;
+                 opacity: 0; transition: opacity 0.3s; z-index: 2000; }
+        .toast.show { opacity: 1; }
 
-        .sidebar-content {
-          padding: 24px 20px;
-          font-family: 'Source Sans Pro', sans-serif;
-          color: #212529;
-        }
-
-        .sidebar-icon-main {
-          width: 100px;
-          height: 100px;
-          margin: 0 auto 24px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #f3f3f3;
-          border-radius: 20px;
-          padding: 20px;
-        }
-
-        .sidebar-icon-main img {
-          width: 100%;
-          height: 100%;
-          object-fit: contain;
-        }
-
-        .sidebar-details {
-          display: flex;
-          flex-direction: row;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-bottom: 20px;
-        }
-
-        .sidebar-detail-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          background: #f3f3f3;
-          padding: 8px 12px;
-          border-radius: 8px;
-          border: 1px solid #565e64;
-          white-space: nowrap;
-        }
-
-        .sidebar-detail-label {
-          font-size: 11px;
-          color: #565e64;
-          font-weight: 600;
-          text-transform: uppercase;
-          letter-spacing: 0.3px;
-        }
-
-        .sidebar-detail-label::after {
-          content: ':';
-        }
-
-        .sidebar-detail-value {
-          font-size: 13px;
-          color: #212529;
-          font-weight: 600;
-        }
-
-        .sidebar-nav-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          width: 100%;
-          padding: 12px 16px;
-          background: #ffffff;
-          border: 2px solid #000000;
-          border-radius: 8px;
-          color: #000000;
-          font-weight: 600;
-          font-size: 16px;
-          font-family: 'Source Sans Pro', sans-serif;
-          cursor: pointer;
-          transition: all 0.2s ease;
-          margin-top: 16px;
-        }
-
-        .sidebar-nav-btn:hover {
-          background: #000000;
-          color: white;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        }
-
-        .sidebar-nav-btn:hover img {
-          filter: brightness(0) invert(1);
-        }
-
-        .sidebar-nav-btn img {
-          width: 28px;
-          height: 28px;
-          transition: filter 0.2s ease;
-        }
-
-        /* Footer */
-        .footer {
-          background: #e8e8e8;
-          padding: 0.5rem 1.5rem;
-          text-align: right;
-          font-size: 80%;
-          border-top: none;
-          position: relative;
-          z-index: 10;
-        }
-        .footer a {
-          color: #212529;
-          text-decoration: none;
-          display: inline-flex;
-          align-items: center;
-          gap: 10px;
-          font-family: 'Source Sans Pro', sans-serif;
-          transition: opacity 0.2s;
-        }
-        .footer a:hover {
-          opacity: 0.7;
-        }
-        .footer img {
-          height: 25px;
-          width: auto;
-          display: inline-block;
-          margin-left: 10px;
-        }
+        .loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                  display: none; flex-direction: column; align-items: center; gap: 12px;
+                  background: rgba(255,255,255,0.95); padding: 24px 32px; border-radius: 8px;
+                  box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 1500; }
+        .loader.show { display: flex; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0;
+                   border-top-color: #4CAF50; border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loader-text { font-size: 14px; color: #333; font-weight: 500; }
       </style>
 
-      <div class="wrapper">
-        <div class="header-bar">
+      <div class="container">
+        <div class="header">
           <img src="../web-component/open-data-hub-icons/Logo_RBG/OpenDataHub_Logo_BK-RGB.svg" alt="Open Data Hub" />
         </div>
-        <div class="description-bar">
+        <div class="title">
           <h2>Explore Urban Green Spaces</h2>
-          <p>Discover vegetation, urban furniture, and green infrastructure in Padova. Browse the map and select categories to explore trees, benches, lawns, and more.</p>
+          <p>Discover vegetation, urban furniture, and green infrastructure in Padova</p>
         </div>
-        <div class="panel">
-          <div class="panel-row">
-            <select id="mainTypeSelect">
-              <option value="">Select main category</option>
-              <option value="1">Vegetation</option>
-              <option value="2">Urban Furniture</option>
-              <option value="3">Use & Management</option>
-            </select>
-            <button id="clearCache">Clear cache</button>
+        <div class="controls">
+          <select id="layerSelect">
+            <option value="">Select a category</option>
+            <option value="1">Vegetation</option>
+            <option value="2">Urban Furniture</option>
+            <option value="3">Use & Management</option>
+          </select>
+          <div class="chip-container" id="subChips">
+            <!-- Chips will be dynamically generated based on selected type -->
           </div>
-          <div class="panel-row subcategory-buttons" id="subcategoryButtons"></div>
+          <button id="clearCache">Clear cache</button>
         </div>
-
-        <div id="map"></div>
-
-        <div class="sidebar-overlay">
+        <div class="map-wrapper">
+          <div id="map"></div>
           <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
-              <img src="../web-component/open-data-hub-icons/Logo_RBG/OpenDataHub_Logo_BK-RGB.svg" alt="Open Data Hub" class="sidebar-header-logo" />
-              <div class="sidebar-title" id="sidebarTitle"></div>
-              <button class="sidebar-close" aria-label="Close">×</button>
+              <button class="sidebar-close" id="closeSidebar">&times;</button>
             </div>
-            <div class="sidebar-content" id="sidebarContent"></div>
+            <div class="sidebar-content" id="sidebarContent">
+              <div class="sidebar-icon" id="sidebarIcon"></div>
+              <div id="sidebarPills"></div>
+              <button class="directions-btn" id="directionsBtn">
+                <img src="../web-component/open-data-hub-icons/btn-navigation.svg" alt="Navigate" />
+                Get Directions
+              </button>
+            </div>
+          </div>
+          <div class="toast" id="toast"></div>
+          <div class="loader" id="loader">
+            <div class="spinner"></div>
+            <div class="loader-text" id="loaderText">Loading...</div>
           </div>
         </div>
-
         <div class="footer">
           <a href="https://opendatahub.com" target="_blank">
             powered by Open Data Hub
@@ -471,74 +411,139 @@ class UrbanGreenMapV2 extends HTMLElement {
       </div>
     `;
 
-    this._sidebar = this.shadowRoot.querySelector("#sidebar");
-    this._sidebarTitle = this.shadowRoot.querySelector("#sidebarTitle");
-    this._sidebarContent = this.shadowRoot.querySelector("#sidebarContent");
-
-    this.shadowRoot.querySelector(".sidebar-close").addEventListener("click", () => {
-      this.closeSidebar();
-    });
-
-    this.shadowRoot.querySelector("#mainTypeSelect").addEventListener("change", (e) => {
-      this.currentMainType = e.target.value || null;
-      this.currentSubcategory = null;
-      this.closeSidebar();
-      this.renderSubcategoryButtons();
-      this.clearLayers();
-      if (this.currentMainType) this.loadViewportData();
+    // Event listeners
+    this.shadowRoot.querySelector("#layerSelect").addEventListener("change", e => {
+      this.onTypeChange(e.target.value);
     });
 
     this.shadowRoot.querySelector("#clearCache").addEventListener("click", () => {
-      this.clearCacheAndReload();
+      this.clearCache();
     });
 
-    this.renderSubcategoryButtons();
+    this.shadowRoot.querySelector("#closeSidebar").addEventListener("click", () => {
+      this.closeSidebar();
+    });
   }
 
-  renderSubcategoryButtons() {
-    const container = this.shadowRoot.querySelector("#subcategoryButtons");
-    container.innerHTML = "";
+  // Generate chips for a given type's subcategories
+  generateChips(typeKey) {
+    const chipContainer = this.shadowRoot.querySelector("#subChips");
+    chipContainer.innerHTML = "";
 
-    if (!this.currentMainType) return;
+    if (!typeKey || !MAIN_TYPES[typeKey]) {
+      chipContainer.classList.remove("show");
+      return;
+    }
 
-    const mainType = MAIN_TYPES[this.currentMainType];
-    if (!mainType) return;
+    const typeConfig = MAIN_TYPES[typeKey];
+    const subcats = typeConfig.subcategories;
 
-    Object.entries(mainType.subcategories).forEach(([key, subcat]) => {
-      const btn = document.createElement("button");
-      btn.className = "subcat-btn";
-      btn.textContent = subcat.name;
-      btn.dataset.subcategory = key;
-      
-      if (this.currentSubcategory === key) {
-        btn.classList.add("active");
+    // Add divider
+    const divider = document.createElement("span");
+    divider.className = "chip-divider";
+    chipContainer.appendChild(divider);
+
+    // Add chip for each subcategory
+    Object.entries(subcats).forEach(([subKey, subConfig], index) => {
+      const chip = document.createElement("button");
+      chip.className = "chip" + (index === 0 ? " active" : "");
+      chip.dataset.sub = subKey;
+      chip.style.setProperty("--chip-color", subConfig.color);
+
+      // Chip label
+      const label = document.createElement("span");
+      label.textContent = subConfig.name;
+      chip.appendChild(label);
+
+      // Add tooltip if description exists
+      if (subConfig.tooltip) {
+        const tooltip = document.createElement("span");
+        tooltip.className = "chip-tooltip";
+        tooltip.textContent = subConfig.tooltip;
+        chip.appendChild(tooltip);
       }
 
-      btn.addEventListener("click", () => {
-        if (this.currentSubcategory === key) {
-          this.currentSubcategory = null;
-        } else {
-          this.currentSubcategory = key;
-        }
-        this.renderSubcategoryButtons();
-        this.updateSources();
+      chip.addEventListener("click", () => {
+        this.onSubCategoryChange(subKey);
+        chipContainer.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
       });
 
-      container.appendChild(btn);
+      chipContainer.appendChild(chip);
     });
+
+    chipContainer.classList.add("show");
   }
 
+  onTypeChange(typeKey) {
+    if (!typeKey) {
+      // No selection - hide chips, clear map
+      this.shadowRoot.querySelector("#subChips").classList.remove("show");
+      this.currentType = null;
+      this.currentSubCategory = null;
+      this._currentFeatures = null;
+      this.cluster = null;
+      this.clearMap();
+      this.closeSidebar();
+      return;
+    }
+
+    // Generate chips for this type
+    this.generateChips(typeKey);
+
+    // Set current type and default to "all" subcategory
+    this.currentType = typeKey;
+    this.currentSubCategory = "all";
+
+    // Reset zoom to default when changing category
+    this.resetMapView();
+    this.updatePmtilesFilters();
+    if (this.isLiveMode()) {
+      this.loadData();
+    } else {
+      this.closeSidebar();
+    }
+  }
+
+  onSubCategoryChange(subKey) {
+    this.currentSubCategory = subKey;
+
+    // Reset zoom to default when changing subcategory
+    this.resetMapView();
+
+    // Data is already cached by type, just re-filter and display
+    this.updatePmtilesFilters();
+    if (this.isLiveMode()) {
+      this.loadData();
+    } else {
+      this.closeSidebar();
+    }
+  }
+
+  // Reset map to default center and zoom
+  resetMapView() {
+    if (this.map) {
+      this.map.easeTo({
+        center: DEFAULT_CENTER,
+        zoom: DEFAULT_ZOOM,
+        duration: 500
+      });
+    }
+  }
 
   initMap() {
-    this.dataLoader = new ViewportDataLoader(this.apiBase, this.lang);
+    this.loader = new ViewportDataLoader(this.apiBase, this.lang);
 
-    const mapContainer = this.shadowRoot.querySelector("#map");
+    if (!window.__pmtilesProtocol) {
+      window.__pmtilesProtocol = new pmtiles.Protocol();
+      maplibregl.addProtocol("pmtiles", window.__pmtilesProtocol.tile);
+    }
+    this.pmtilesProtocol = window.__pmtilesProtocol;
 
     this.map = new maplibregl.Map({
-      container: mapContainer,
+      container: this.shadowRoot.querySelector("#map"),
       center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM,
-      maxZoom: 22,
       style: {
         version: 8,
         glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
@@ -546,478 +551,780 @@ class UrbanGreenMapV2 extends HTMLElement {
           osm: {
             type: "raster",
             tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            maxzoom: 19,
-          },
+            tileSize: 256
+          }
         },
-        layers: [{ id: "osm", type: "raster", source: "osm" }],
-      },
+        layers: [{ id: "osm", type: "raster", source: "osm" }]
+      }
     });
 
     this.map.addControl(new maplibregl.NavigationControl());
 
     this.map.on("load", () => {
-      this.createSourcesAndLayers();
-      this.bindInteractionHandlersOnce();
+      this.setupLiveLayers();
+      this.setupBaseInteractions();
+      this.setupLiveInteractions();
+      this.setupPmtiles();
+      this.updateDataMode(true);
     });
 
+    // Re-cluster points on zoom/pan (no API reload, just re-render clusters)
     this.map.on("moveend", () => this.onMapMove());
-    this.map.on("zoomend", () => this.onMapMove());
-    this.map.on("movestart", () => {
-      this.dataLoader?.abortAll();
+    this.map.on("zoomend", () => this.updateDataMode());
+  }
+
+  onMapMove() {
+    if (!this.isLiveMode()) return;
+    // Only re-cluster if we have data and it contains points
+    if (this._currentFeatures && this.cluster) {
+      this.renderClusters();
+    }
+  }
+
+  setupLiveLayers() {
+    // Single source for all data
+    this.map.addSource("data", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] }
     });
 
-    this.map.on("click", (e) => {
-      if (!e.defaultPrevented) {
-        this.closeSidebar();
+    // Fill layer for polygons
+    this.map.addLayer({
+      id: "polygons-fill",
+      type: "fill",
+      source: "data",
+      filter: ["==", ["geometry-type"], "Polygon"],
+      paint: {
+        "fill-color": ["get", "_color"],
+        "fill-opacity": 0.7
+      }
+    });
+
+    // Outline for polygons - thicker colored border for visibility
+    this.map.addLayer({
+      id: "polygons-outline",
+      type: "line",
+      source: "data",
+      filter: ["==", ["geometry-type"], "Polygon"],
+      paint: {
+        "line-color": ["get", "_color"],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 2,    // At zoom 10: 2px border
+          14, 3,    // At zoom 14: 3px border
+          18, 4     // At zoom 18: 4px border
+        ],
+        "line-opacity": 0.9
+      }
+    });
+
+    // Extra outline for small polygons - white outer stroke for contrast
+    this.map.addLayer({
+      id: "polygons-outline-outer",
+      type: "line",
+      source: "data",
+      filter: ["==", ["geometry-type"], "Polygon"],
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 3,
+          14, 4,
+          18, 5
+        ],
+        "line-opacity": 0.5,
+        "line-gap-width": 0
+      }
+    });
+
+    // Move polygons-outline above the outer stroke
+    this.map.moveLayer("polygons-outline");
+
+    // Line layer outer stroke (for contrast)
+    this.map.addLayer({
+      id: "lines-outer",
+      type: "line",
+      source: "data",
+      filter: ["==", ["geometry-type"], "LineString"],
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 5,
+          14, 7,
+          18, 9
+        ],
+        "line-opacity": 0.6
+      }
+    });
+
+    // Line layer (hedges, tree rows)
+    this.map.addLayer({
+      id: "lines",
+      type: "line",
+      source: "data",
+      filter: ["==", ["geometry-type"], "LineString"],
+      paint: {
+        "line-color": ["get", "_color"],
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 3,
+          14, 4,
+          18, 6
+        ],
+        "line-opacity": 0.9
+      }
+    });
+
+    // Cluster circles
+    this.map.addLayer({
+      id: "clusters",
+      type: "circle",
+      source: "data",
+      filter: ["has", "point_count"],
+      paint: {
+        "circle-radius": ["step", ["get", "point_count"], 15, 10, 20, 50, 25, 200, 30],
+        "circle-color": "#10b981",
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#fff"
+      }
+    });
+
+    // Cluster count
+    this.map.addLayer({
+      id: "cluster-count",
+      type: "symbol",
+      source: "data",
+      filter: ["has", "point_count"],
+      layout: {
+        "text-field": ["get", "point_count_abbreviated"],
+        "text-size": 12
+      },
+      paint: { "text-color": "#fff" }
+    });
+
+    // Individual points
+    this.map.addLayer({
+      id: "points",
+      type: "circle",
+      source: "data",
+      filter: ["all", ["==", ["geometry-type"], "Point"], ["!", ["has", "point_count"]]],
+      paint: {
+        "circle-radius": 6,
+        "circle-color": ["get", "_color"],
+        "circle-stroke-width": 1,
+        "circle-stroke-color": "#fff"
       }
     });
   }
 
-  onMapMove() {
-    clearTimeout(this.moveDebounceTimer);
-    this.moveDebounceTimer = setTimeout(() => {
-      if (this.currentMainType) this.loadViewportData();
-    }, MAP_MOVE_DEBOUNCE);
+  setupPmtiles() {
+    if (!this.map || this.pmtilesReady) return;
+
+    try {
+      const archive = new pmtiles.PMTiles(this.pmtilesUrl);
+      this.pmtilesArchive = archive;
+      this.pmtilesProtocol.add(archive);
+
+      if (!this.map.getSource(PMTILES_SOURCE)) {
+        this.map.addSource(PMTILES_SOURCE, {
+          type: "vector",
+          url: `pmtiles://${this.pmtilesUrl}`,
+          attribution: "© Data contributors"
+        });
+      }
+
+      this.setupPmtilesLayers();
+      this.setupPmtilesInteractions();
+      this.pmtilesReady = true;
+      this.updatePmtilesFilters();
+      this.applyDataModeVisibility();
+    } catch (err) {
+      console.error("PMTiles setup error:", err);
+    }
   }
 
+  setupPmtilesLayers() {
+    if (this.map.getLayer("pm-polygons-fill")) return;
 
-  async loadViewportData() {
-    if (!this.currentMainType) return;
+    const baseFilter = ["==", ["get", "__never__"], "__never__"];
 
-    const requestId = ++this._requestSeq;
-    this.dataLoader.abortAll();
+    this.map.addLayer({
+      id: "pm-polygons-fill",
+      type: "fill",
+      source: PMTILES_SOURCE,
+      "source-layer": PMTILES_SOURCE_LAYER,
+      filter: baseFilter,
+      paint: {
+        "fill-color": "#888888",
+        "fill-opacity": 0.7
+      },
+      layout: { visibility: "none" }
+    });
 
-    const bounds = this.map.getBounds();
+    this.map.addLayer({
+      id: "pm-polygons-outline-outer",
+      type: "line",
+      source: PMTILES_SOURCE,
+      "source-layer": PMTILES_SOURCE_LAYER,
+      filter: baseFilter,
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 3,
+          14, 4,
+          18, 5
+        ],
+        "line-opacity": 0.5
+      },
+      layout: { visibility: "none" }
+    });
+
+    this.map.addLayer({
+      id: "pm-polygons-outline",
+      type: "line",
+      source: PMTILES_SOURCE,
+      "source-layer": PMTILES_SOURCE_LAYER,
+      filter: baseFilter,
+      paint: {
+        "line-color": "#888888",
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 2,
+          14, 3,
+          18, 4
+        ],
+        "line-opacity": 0.9
+      },
+      layout: { visibility: "none" }
+    });
+
+    this.map.addLayer({
+      id: "pm-lines-outer",
+      type: "line",
+      source: PMTILES_SOURCE,
+      "source-layer": PMTILES_SOURCE_LAYER,
+      filter: baseFilter,
+      paint: {
+        "line-color": "#ffffff",
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 5,
+          14, 7,
+          18, 9
+        ],
+        "line-opacity": 0.6
+      },
+      layout: { visibility: "none" }
+    });
+
+    this.map.addLayer({
+      id: "pm-lines",
+      type: "line",
+      source: PMTILES_SOURCE,
+      "source-layer": PMTILES_SOURCE_LAYER,
+      filter: baseFilter,
+      paint: {
+        "line-color": "#888888",
+        "line-width": [
+          "interpolate", ["linear"], ["zoom"],
+          10, 3,
+          14, 4,
+          18, 6
+        ],
+        "line-opacity": 0.9
+      },
+      layout: { visibility: "none" }
+    });
+
+    this.map.addLayer({
+      id: "pm-points",
+      type: "circle",
+      source: PMTILES_SOURCE,
+      "source-layer": PMTILES_SOURCE_LAYER,
+      filter: baseFilter,
+      paint: {
+        "circle-radius": 6,
+        "circle-color": "#888888",
+        "circle-stroke-width": 1,
+        "circle-stroke-color": "#fff"
+      },
+      layout: { visibility: "none" }
+    });
+  }
+
+  updatePmtilesFilters() {
+    if (!this.pmtilesReady || !this.map) return;
+
+    const category = this.getActiveCategory();
+    this._pmAllowedGeometries = category?.geometries || null;
+    this._pmHasCategory = !!category;
+
+    if (!category) {
+      this.setPmtilesLayerVisibility(false);
+      return;
+    }
+
+    const filters = [
+      ["==", this._pmTypeExpr, category.type]
+    ];
+
+    if (category.subtypes) {
+      filters.push(["in", this._pmSubtypeExpr, ["literal", category.subtypes]]);
+    }
+
+    const polygonFilter = ["all", ["==", ["geometry-type"], "Polygon"], ...filters];
+    const lineFilter = ["all", ["==", ["geometry-type"], "LineString"], ...filters];
+    const pointFilter = ["all", ["==", ["geometry-type"], "Point"], ...filters];
+
+    this.map.setFilter("pm-polygons-fill", polygonFilter);
+    this.map.setFilter("pm-polygons-outline", polygonFilter);
+    this.map.setFilter("pm-polygons-outline-outer", polygonFilter);
+    this.map.setFilter("pm-lines", lineFilter);
+    this.map.setFilter("pm-lines-outer", lineFilter);
+    this.map.setFilter("pm-points", pointFilter);
+
+    const colorExpr = category.multiColor ? this.getPmSubtypeColorExpression() : category.color;
+    this.map.setPaintProperty("pm-polygons-fill", "fill-color", colorExpr);
+    this.map.setPaintProperty("pm-polygons-outline", "line-color", colorExpr);
+    this.map.setPaintProperty("pm-lines", "line-color", colorExpr);
+    this.map.setPaintProperty("pm-points", "circle-color", colorExpr);
+
+    this.setPmtilesLayerVisibility(this._dataMode === "pmtiles", this._pmAllowedGeometries);
+  }
+
+  getPmSubtypeColorExpression() {
+    if (this._pmSubtypeColorExpr) return this._pmSubtypeColorExpr;
+
+    const expr = ["match", this._pmSubtypeExpr];
+    Object.entries(SUBTYPE_COLORS).forEach(([subtype, color]) => {
+      expr.push(subtype, color);
+    });
+    expr.push("#888888");
+    this._pmSubtypeColorExpr = expr;
+    return expr;
+  }
+
+  setLayerVisibility(layerId, visible) {
+    if (!this.map.getLayer(layerId)) return;
+    this.map.setLayoutProperty(layerId, "visibility", visible ? "visible" : "none");
+  }
+
+  setLiveLayerVisibility(visible) {
+    LIVE_LAYER_IDS.forEach(layerId => this.setLayerVisibility(layerId, visible));
+  }
+
+  setPmtilesLayerVisibility(visible, allowedGeometries = null) {
+    const show = visible && this._pmHasCategory;
+    const geomSet = allowedGeometries ? new Set(allowedGeometries) : null;
+    const showPolygons = show && (!geomSet || geomSet.has("Polygon"));
+    const showLines = show && (!geomSet || geomSet.has("LineString"));
+    const showPoints = show && (!geomSet || geomSet.has("Point"));
+
+    this.setLayerVisibility("pm-polygons-fill", showPolygons);
+    this.setLayerVisibility("pm-polygons-outline", showPolygons);
+    this.setLayerVisibility("pm-polygons-outline-outer", showPolygons);
+    this.setLayerVisibility("pm-lines", showLines);
+    this.setLayerVisibility("pm-lines-outer", showLines);
+    this.setLayerVisibility("pm-points", showPoints);
+  }
+
+  applyDataModeVisibility() {
+    const liveVisible = this.isLiveMode();
+    this.setLiveLayerVisibility(liveVisible);
+    this.setPmtilesLayerVisibility(!liveVisible, this._pmAllowedGeometries);
+  }
+
+  updateDataMode(force = false) {
+    if (!this.map) return;
     const zoom = this.map.getZoom();
 
-    const features = await this.dataLoader.loadViewportData(bounds, zoom, this.currentMainType, {
-      activeOnly: true,
-      profile: "map",
-    });
-
-    if (requestId !== this._requestSeq) return;
-
-    this.layerData[this.currentMainType] = Array.isArray(features) ? features : [];
-
-    if (this.currentMainType !== "3") {
-      this.buildClusters(this.currentMainType);
+    let nextMode = this._dataMode;
+    if (zoom >= this.liveZoomIn) {
+      nextMode = "pmtiles";
+    } else if (zoom <= this.liveZoomOut) {
+      nextMode = "live";
     }
 
-    this.updateSources();
+    if (force || nextMode !== this._dataMode) {
+      this.setDataMode(nextMode, force);
+    }
   }
 
-  buildClusters(type) {
-    const filtered = this.getFilteredFeatures(type);
-    const points = filtered
-      .filter((f) => f?.geometry?.type === "Point")
-      .map((f) => ({
-        type: "Feature",
-        geometry: f.geometry,
-        properties: { ...(f.properties || {}) },
-      }));
+  setDataMode(mode, force = false) {
+    if (!force && this._dataMode === mode) return;
+    this._dataMode = mode;
 
-    const cluster = new Supercluster({
-      radius: CLUSTER_RADIUS,
-      maxZoom: CLUSTER_MAX_ZOOM,
-      extent: 512,
-      minPoints: 2,
+    this.closeSidebar();
+    this.hideLoader();
+    this.applyDataModeVisibility();
+
+    if (this.isLiveMode()) {
+      if (this.currentType) {
+        this.loadData();
+      }
+    } else {
+      this.loader?.abort();
+      this.clearMap();
+    }
+  }
+
+  setupBaseInteractions() {
+    this._featureClicked = false;
+
+    // Close sidebar when clicking empty map area
+    this.map.on("click", () => {
+      // Use setTimeout to check after feature click handlers have run
+      setTimeout(() => {
+        if (!this._featureClicked) {
+          this.closeSidebar();
+        }
+        this._featureClicked = false;
+      }, 0);
+    });
+  }
+
+  setupLiveInteractions() {
+    // Click handlers for live features
+    ["polygons-fill", "lines", "points"].forEach(layer => {
+      this.map.on("click", layer, e => {
+        if (e.features?.[0]) {
+          this._featureClicked = true;
+          this.showSidebar(e.features[0]);
+        }
+      });
+      this.map.on("mouseenter", layer, () => this.map.getCanvas().style.cursor = "pointer");
+      this.map.on("mouseleave", layer, () => this.map.getCanvas().style.cursor = "");
     });
 
-    cluster.load(points);
-    this.clusterIndex[type] = cluster;
+    // Cluster click to zoom (live only)
+    this.map.on("click", "clusters", e => {
+      if (!this.isLiveMode() || !e.features?.[0] || !this.cluster) return;
+      this._featureClicked = true;
+      const clusterId = e.features[0].properties.cluster_id;
+      const zoom = this.cluster.getClusterExpansionZoom(clusterId);
+      this.map.easeTo({ center: e.features[0].geometry.coordinates, zoom });
+    });
   }
 
-  getFilteredFeatures(type) {
-    const raw = Array.isArray(this.layerData[type]) ? this.layerData[type] : [];
-    
-    if (!this.currentSubcategory) {
-      return raw;
+  setupPmtilesInteractions() {
+    // Click handlers for PMTiles features
+    ["pm-polygons-fill", "pm-lines", "pm-points"].forEach(layer => {
+      this.map.on("click", layer, e => {
+        if (e.features?.[0]) {
+          this._featureClicked = true;
+          this.showSidebar(e.features[0]);
+        }
+      });
+      this.map.on("mouseenter", layer, () => this.map.getCanvas().style.cursor = "pointer");
+      this.map.on("mouseleave", layer, () => this.map.getCanvas().style.cursor = "");
+    });
+  }
+
+  isLiveMode() {
+    return this._dataMode === "live";
+  }
+
+  getActiveCategory() {
+    // Get the active category config based on current selections
+    if (!this.currentType) return null;
+
+    const typeConfig = MAIN_TYPES[this.currentType];
+    if (!typeConfig) return null;
+
+    const subKey = this.currentSubCategory || "all";
+    const subConfig = typeConfig.subcategories[subKey];
+
+    if (!subConfig) return null;
+
+    // Return a combined config object
+    return {
+      type: this.currentType,
+      typeName: typeConfig.name,
+      name: subConfig.name,
+      subtypes: subConfig.subtypes,
+      geometries: subConfig.geometries,
+      color: subConfig.color,
+      multiColor: subConfig.multiColor,
+      icon: subConfig.icon
+    };
+  }
+
+  async loadData() {
+    const category = this.getActiveCategory();
+    if (!category) return;
+    if (!this.isLiveMode()) return;
+
+    const seq = ++this._seq;
+
+    console.log(`🔄 Loading ${category.name}...`);
+    this.showLoader(`Loading ${category.name}...`);
+
+    // Abort any pending requests
+    this.loader.abort();
+
+    // Clear map immediately
+    this.clearMap();
+    this.closeSidebar();
+
+    try {
+      // Load ALL data for this type (uses memory cache after first load)
+      const features = await this.loader.loadTypeData(category.type);
+
+      if (seq !== this._seq) {
+        this.hideLoader();
+        return; // Outdated request
+      }
+
+      // Filter by category criteria
+      const filtered = this.filterFeatures(features, category);
+      console.log(`🎯 Filtered to ${filtered.length} features`);
+
+      // Update map
+      this.updateMap(filtered, category);
+      this.hideLoader();
+
+    } catch (err) {
+      console.error("Load error:", err);
+      this.hideLoader();
     }
+  }
 
-    const mainType = MAIN_TYPES[type];
-    if (!mainType) return raw;
+  filterFeatures(features, category) {
+    // Debug: count subtypes and geometry types before filtering
+    const subtypeCounts = {};
+    const geomCounts = {};
+    features.forEach(f => {
+      const st = f.properties.greenCodeSubtype;
+      const gt = f.geometry?.type;
+      subtypeCounts[st] = (subtypeCounts[st] || 0) + 1;
+      geomCounts[gt] = (geomCounts[gt] || 0) + 1;
+    });
+    console.log('📊 Subtypes in data:', subtypeCounts);
+    console.log('📊 Geometries in data:', geomCounts);
+    console.log('🎯 Filter config:', { subtypes: category.subtypes, geometries: category.geometries });
 
-    const subcat = mainType.subcategories[this.currentSubcategory];
-    if (!subcat) return raw;
+    const filtered = features.filter(f => {
+      const props = f.properties;
+      const geomType = f.geometry?.type;
 
-    const filtered = raw.filter(f => {
-      const props = f.properties || {};
-      const subtype = String(props.greenCodeSubtype || "").padStart(2, "0");
-      
-      const subtypeMatch = subcat.subtypes.includes(subtype);
-      if (!subtypeMatch) return false;
+      // Match geometry type (if specified)
+      if (category.geometries && !category.geometries.includes(geomType)) {
+        return false;
+      }
 
-      if (subcat.geometries && subcat.geometries.length > 0) {
-        return subcat.geometries.includes(f.geometry?.type);
+      // Match subtype if specified
+      if (category.subtypes) {
+        const subtype = String(props.greenCodeSubtype || "").padStart(2, "0");
+        if (!category.subtypes.includes(subtype)) {
+          return false;
+        }
       }
 
       return true;
     });
-    
-    console.log(`Filtered ${raw.length} → ${filtered.length} features for subcategory ${this.currentSubcategory}`);
-    
+
+    console.log(`🔍 Filter: geometries=${category.geometries}, subtypes=${category.subtypes} → ${filtered.length} features`);
     return filtered;
   }
 
+  updateMap(features, category) {
+    // Add color to features - either single color or multi-color based on subtype
+    const enriched = features.map(f => {
+      let color = category.color;
 
-  createSourcesAndLayers() {
-    ["1", "2", "3"].forEach((type) => {
-      const srcId = `src-${type}`;
-
-      if (!this.map.getSource(srcId)) {
-        this.map.addSource(srcId, {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-        });
+      // Multi-color mode: color by subtype
+      if (category.multiColor) {
+        const subtype = String(f.properties.greenCodeSubtype || "").padStart(2, "0");
+        color = SUBTYPE_COLORS[subtype] || "#888888";
       }
 
-      if (!this.map.getLayer(`fill-${type}`)) {
-        this.map.addLayer({
-          id: `fill-${type}`,
-          type: "fill",
-          source: srcId,
-          filter: ["==", ["geometry-type"], "Polygon"],
-          paint: {
-            "fill-color": this.getSubcategoryColorExpression(type),
-            "fill-opacity": type === "1" ? 0.45 : 0.6,
-          },
-        });
-      }
-
-      if (!this.map.getLayer(`outline-${type}`)) {
-        this.map.addLayer({
-          id: `outline-${type}`,
-          type: "line",
-          source: srcId,
-          filter: ["==", ["geometry-type"], "Polygon"],
-          paint: { "line-color": "#fff", "line-width": 1 },
-        });
-      }
-
-      if (!this.map.getLayer(`lines-${type}`)) {
-        this.map.addLayer({
-          id: `lines-${type}`,
-          type: "line",
-          source: srcId,
-          filter: ["==", ["geometry-type"], "LineString"],
-          paint: {
-            "line-color": this.getSubcategoryColorExpression(type),
-            "line-width": 3,
-            "line-opacity": 0.8,
-          },
-        });
-      }
-
-      if (type !== "3") {
-        if (!this.map.getLayer(`clusters-${type}`)) {
-          this.map.addLayer({
-            id: `clusters-${type}`,
-            type: "circle",
-            source: srcId,
-            filter: ["has", "point_count"],
-            paint: {
-              "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 50, 28, 200, 34],
-              "circle-color": "#10b981",
-              "circle-stroke-width": 2,
-              "circle-stroke-color": "#fff",
-              "circle-opacity": 0.9,
-            },
-          });
+      return {
+        ...f,
+        properties: {
+          ...f.properties,
+          _color: color
         }
-
-        if (!this.map.getLayer(`cluster-count-${type}`)) {
-          this.map.addLayer({
-            id: `cluster-count-${type}`,
-            type: "symbol",
-            source: srcId,
-            filter: ["has", "point_count"],
-            layout: {
-              "text-field": ["get", "point_count_abbreviated"],
-              "text-size": 13,
-              "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"],
-              "text-allow-overlap": true,
-            },
-            paint: { "text-color": "#fff" },
-          });
-        }
-
-        if (!this.map.getLayer(`points-${type}`)) {
-          this.map.addLayer({
-            id: `points-${type}`,
-            type: "circle",
-            source: srcId,
-            filter: ["all", ["==", ["geometry-type"], "Point"], ["!", ["has", "point_count"]]],
-            paint: {
-              "circle-radius": 6,
-              "circle-color": this.getSubcategoryColorExpression(type),
-              "circle-stroke-width": 1,
-              "circle-stroke-color": "#fff",
-            },
-          });
-        }
-      }
+      };
     });
+
+    // Separate points for clustering
+    const points = enriched.filter(f => f.geometry?.type === "Point");
+    const others = enriched.filter(f => f.geometry?.type !== "Point");
+
+    // Store for re-clustering on zoom
+    this._currentFeatures = { points, others };
+
+    // Setup cluster index
+    this.cluster = new Supercluster({ radius: 60, maxZoom: 16 });
+    this.cluster.load(points);
+
+    // Render with current zoom
+    this.renderClusters();
   }
 
-  updateSources() {
-    ["1", "2", "3"].forEach((type) => {
-      const src = this.map.getSource(`src-${type}`);
-      if (!src) return;
+  renderClusters() {
+    if (!this._currentFeatures) return;
 
-      if (type !== this.currentMainType) {
-        src.setData({ type: "FeatureCollection", features: [] });
-        return;
-      }
+    const { points, others } = this._currentFeatures;
 
-      const filtered = this.getFilteredFeatures(type);
+    // Get clusters for current view
+    const bounds = this.map.getBounds();
+    const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+    const zoom = Math.floor(this.map.getZoom());
+    const clustered = this.cluster ? this.cluster.getClusters(bbox, zoom) : points;
 
-      if (type === "3") {
-        src.setData({
-          type: "FeatureCollection",
-          features: filtered.filter((f) => f?.geometry?.type === "Polygon"),
-        });
-        return;
-      }
+    // Combine all features
+    const allFeatures = [...others, ...clustered];
 
-      const polygons = filtered.filter((f) => f?.geometry?.type === "Polygon");
-      const lines = filtered.filter((f) => f?.geometry?.type === "LineString");
-      const cluster = this.clusterIndex[type];
-
-      const b = this.map.getBounds();
-      const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
-      const z = Math.floor(this.map.getZoom());
-
-      const clustered = cluster ? cluster.getClusters(bbox, z) : [];
-
-      src.setData({
+    // Update source
+    const source = this.map.getSource("data");
+    if (source) {
+      source.setData({
         type: "FeatureCollection",
-        features: [...polygons, ...lines, ...clustered],
+        features: allFeatures
       });
-    });
+    }
+
+    console.log(`🗺️ Rendered: ${others.length} polygons/lines, ${clustered.length} point clusters (zoom ${zoom})`);
   }
 
-
-  bindInteractionHandlersOnce() {
-    if (this._handlersBound) return;
-    this._handlersBound = true;
-
-    ["1", "2", "3"].forEach((type) => {
-      if (type !== "3") {
-        this.map.on("click", `clusters-${type}`, (e) => {
-          e.preventDefault();
-          const f = e.features?.[0];
-          if (!f) return;
-
-          const idx = this.clusterIndex[type];
-          const clusterId = f.properties?.cluster_id;
-          const coords = f.geometry?.coordinates;
-
-          if (!idx || clusterId === undefined || !coords) {
-            if (coords) this.map.easeTo({ center: coords, zoom: this.map.getZoom() + 2 });
-            return;
-          }
-
-          const targetZoom = Math.min(idx.getClusterExpansionZoom(clusterId), this.map.getMaxZoom());
-          this.map.easeTo({ center: coords, zoom: targetZoom });
-        });
-
-        this.map.on("click", `points-${type}`, (e) => {
-          e.preventDefault();
-          const f = e.features?.[0];
-          if (!f) return;
-          this.showSidebar(f);
-        });
-
-        ["clusters-" + type, "points-" + type].forEach((layerId) => {
-          this.map.on("mouseenter", layerId, () => (this.map.getCanvas().style.cursor = "pointer"));
-          this.map.on("mouseleave", layerId, () => (this.map.getCanvas().style.cursor = ""));
-        });
-      }
-
-      this.map.on("click", `fill-${type}`, (e) => {
-        e.preventDefault();
-        const f = e.features?.[0];
-        if (!f) return;
-        this.showSidebar(f);
-      });
-
-      this.map.on("click", `lines-${type}`, (e) => {
-        e.preventDefault();
-        const f = e.features?.[0];
-        if (!f) return;
-        this.showSidebar(f);
-      });
-
-      this.map.on("mouseenter", `fill-${type}`, () => (this.map.getCanvas().style.cursor = "pointer"));
-      this.map.on("mouseleave", `fill-${type}`, () => (this.map.getCanvas().style.cursor = ""));
-      
-      this.map.on("mouseenter", `lines-${type}`, () => (this.map.getCanvas().style.cursor = "pointer"));
-      this.map.on("mouseleave", `lines-${type}`, () => (this.map.getCanvas().style.cursor = ""));
-    });
+  clearMap() {
+    const source = this.map.getSource("data");
+    if (source) {
+      source.setData({ type: "FeatureCollection", features: [] });
+    }
   }
-
 
   showSidebar(feature) {
-    const p = feature?.properties || {};
-    const mainType = MAIN_TYPES[this.currentMainType];
-    const typeName = mainType?.name || "Unknown";
+    const props = feature.properties || {};
+    const langKey = `name_${this.lang}`;
+    const rawGreenCode = props.greenCode || props.code || null;
 
-    let subcatName = "";
-    let subcatIcon = "";
-    let subcatKey = "";
+    let typeCode = props.greenCodeType || props.type || null;
+    if (!typeCode && rawGreenCode) {
+      typeCode = String(rawGreenCode).slice(1, 2);
+    }
+    typeCode = typeCode ? String(typeCode) : "";
 
-    if (mainType) {
-      const subtype = String(p.greenCodeSubtype || "").padStart(2, "0");
-      const geomType = feature.geometry?.type;
+    let subtype = props.greenCodeSubtype || null;
+    if (!subtype && rawGreenCode) {
+      subtype = String(rawGreenCode).slice(2, 4);
+    }
+    subtype = String(subtype || "").padStart(2, "0");
 
-      for (const [key, subcat] of Object.entries(mainType.subcategories)) {
-        const subtypeMatch = subcat.subtypes.includes(subtype);
-        const geomMatch = !subcat.geometries || subcat.geometries.includes(geomType);
+    const info = getGreenSpaceInfo(typeCode, subtype, this.lang);
+    const apiName = props.name || props[langKey] || props.title;
+    const displayName = apiName && String(apiName).trim() ? apiName : info.name;
 
-        if (subtypeMatch && geomMatch) {
-          subcatName = subcat.name;
-          subcatIcon = subcat.icon || "";
-          subcatKey = key;
-          break;
-        }
-      }
+    let greenCode = rawGreenCode;
+    if (!greenCode && typeCode) {
+      greenCode = `P${typeCode}${subtype}${String(props.id || "").slice(-2)}`;
+    }
+    if (!greenCode) {
+      greenCode = "N/A";
     }
 
-    const iconPath = subcatIcon ? `../web-component/open-data-hub-icons/${subcatIcon}` : "";
-
-    // Get coordinates for navigation
-    let coordinates = null;
-    if (feature.geometry?.type === "Point") {
-      coordinates = feature.geometry.coordinates;
-    } else if (feature.geometry?.type === "Polygon" && feature.geometry.coordinates?.[0]?.[0]) {
-      // Use first coordinate of polygon
-      coordinates = feature.geometry.coordinates[0][0];
-    } else if (feature.geometry?.type === "LineString" && feature.geometry.coordinates?.[0]) {
-      // Use first coordinate of line
-      coordinates = feature.geometry.coordinates[0];
+    // Get feature center for directions
+    const geom = feature.geometry;
+    let center = null;
+    if (geom?.type === "Point") {
+      center = geom.coordinates;
+    } else if (geom?.type === "Polygon" && geom.coordinates?.[0]) {
+      // Get centroid of polygon
+      const coords = geom.coordinates[0];
+      let sumLng = 0, sumLat = 0;
+      for (const [lng, lat] of coords) { sumLng += lng; sumLat += lat; }
+      center = [sumLng / coords.length, sumLat / coords.length];
+    } else if (geom?.type === "LineString" && geom.coordinates?.length) {
+      // Get midpoint of line
+      const mid = Math.floor(geom.coordinates.length / 2);
+      center = geom.coordinates[mid];
     }
 
-    this._sidebarTitle.textContent = p.title || "Green Area";
+    // Icon section - use icon based on subtype
+    const iconEl = this.shadowRoot.querySelector("#sidebarIcon");
+    if (info.icon) {
+      iconEl.innerHTML = `<img src="../web-component/open-data-hub-icons/${info.icon}" alt="${displayName}" />`;
+      iconEl.classList.remove("empty");
+    } else {
+      iconEl.innerHTML = "";
+      iconEl.classList.add("empty");
+    }
 
-    this._sidebarContent.innerHTML = `
-      ${iconPath ? `
-      <div class="sidebar-icon-main">
-        <img src="${iconPath}" alt="${this._escapeHtml(subcatName)}" />
+    // Pills section - now shows actual API name
+    this.shadowRoot.querySelector("#sidebarPills").innerHTML = `
+      <div class="info-pill">
+        <span class="info-pill-label">Name:</span>
+        <span class="info-pill-value">${displayName}</span>
       </div>
-      ` : ''}
-      <div class="sidebar-details">
-        ${subcatName ? `
-        <div class="sidebar-detail-item">
-          <span class="sidebar-detail-label">Subcategory</span>
-          <span class="sidebar-detail-value">${this._escapeHtml(subcatName)}</span>
+      <div class="info-pill">
+        <span class="info-pill-label">Category:</span>
+        <span class="info-pill-value">${info.typeName}</span>
+      </div>
+      <div class="info-pills-row">
+        <div class="info-pill">
+          <span class="info-pill-label">Green Code:</span>
+          <span class="info-pill-value">${greenCode}</span>
         </div>
-        ` : ''}
-        <div class="sidebar-detail-item">
-          <span class="sidebar-detail-label">Category</span>
-          <span class="sidebar-detail-value">${this._escapeHtml(typeName)}</span>
-        </div>
-        <div class="sidebar-detail-item">
-          <span class="sidebar-detail-label">Green Code</span>
-          <span class="sidebar-detail-value">${this._escapeHtml(p.greenCode || "N/A")}</span>
-        </div>
-        <div class="sidebar-detail-item">
-          <span class="sidebar-detail-label">Geometry</span>
-          <span class="sidebar-detail-value">${this._escapeHtml(feature.geometry?.type || "Unknown")}</span>
-        </div>
-        <div class="sidebar-detail-item">
-          <span class="sidebar-detail-label">Status</span>
-          <span class="sidebar-detail-value">${p.isActive ? "Active" : "Inactive"}</span>
+        <div class="info-pill">
+          <span class="info-pill-label">Geometry:</span>
+          <span class="info-pill-value">${geom?.type || 'N/A'}</span>
         </div>
       </div>
-      ${coordinates ? `
-      <button class="sidebar-nav-btn" onclick="window.open('https://www.google.com/maps/dir/?api=1&destination=${coordinates[1]},${coordinates[0]}', '_blank')" title="Get directions">
-        <img src="../web-component/open-data-hub-icons/btn-navigation.svg" alt="Navigate" />
-        <span>Get Directions</span>
-      </button>
-      ` : ''}
+      <div class="info-pill">
+        <span class="info-pill-label">ID:</span>
+        <span class="info-pill-value">${props.id || 'N/A'}</span>
+      </div>
     `;
 
-    this._sidebar.classList.add("open");
+    // Directions button - store center for click handler
+    const directionsBtn = this.shadowRoot.querySelector("#directionsBtn");
+    if (center) {
+      directionsBtn.style.display = "flex";
+      directionsBtn.onclick = () => {
+        const [lng, lat] = center;
+        window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, "_blank");
+      };
+    } else {
+      directionsBtn.style.display = "none";
+    }
+
+    this.shadowRoot.querySelector("#sidebar").classList.add("open");
   }
 
   closeSidebar() {
-    this._sidebar?.classList.remove("open");
+    this.shadowRoot.querySelector("#sidebar").classList.remove("open");
   }
 
-  _escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = String(str ?? "");
-    return div.innerHTML;
+  showToast(msg) {
+    const toast = this.shadowRoot.querySelector("#toast");
+    toast.textContent = msg;
+    toast.classList.add("show");
+    setTimeout(() => toast.classList.remove("show"), 2000);
   }
 
-
-  async clearCacheAndReload() {
-    this.closeSidebar();
-    await this.dataLoader.clearCache();
-    this.clearLayers();
-    if (this.currentMainType) this.loadViewportData();
+  showLoader(text = "Loading...") {
+    const loader = this.shadowRoot.querySelector("#loader");
+    const loaderText = this.shadowRoot.querySelector("#loaderText");
+    loaderText.textContent = text;
+    loader.classList.add("show");
   }
 
-  clearLayers() {
-    ["1", "2", "3"].forEach((t) => {
-      const src = this.map.getSource(`src-${t}`);
-      if (src) src.setData({ type: "FeatureCollection", features: [] });
-      this.layerData[t] = [];
-    });
+  hideLoader() {
+    this.shadowRoot.querySelector("#loader").classList.remove("show");
   }
 
-  colorForType(type) {
-    return MAIN_TYPES[type]?.color || "#999";
-  }
-
-  getSubcategoryColorExpression(type) {
-    const mainType = MAIN_TYPES[type];
-    if (!mainType) return this.colorForType(type);
-
-    const expression = ["case"];
-    let hasColors = false;
-
-    for (const [key, subcat] of Object.entries(mainType.subcategories)) {
-      if (subcat.color) {
-        hasColors = true;
-        for (const subtype of subcat.subtypes) {
-          const subtypeStr = subtype.padStart(2, "0");
-
-          if (subcat.geometries) {
-            for (const geom of subcat.geometries) {
-              expression.push(
-                ["all",
-                  ["any",
-                    ["==", ["to-string", ["get", "greenCodeSubtype"]], subtypeStr],
-                    ["==", ["get", "greenCodeSubtype"], subtypeStr],
-                    ["==", ["get", "greenCodeSubtype"], parseInt(subtype, 10)]
-                  ],
-                  ["==", ["geometry-type"], geom]
-                ],
-                subcat.color
-              );
-            }
-          } else {
-            expression.push(
-              ["any",
-                ["==", ["to-string", ["get", "greenCodeSubtype"]], subtypeStr],
-                ["==", ["get", "greenCodeSubtype"], subtypeStr],
-                ["==", ["get", "greenCodeSubtype"], parseInt(subtype, 10)]
-              ],
-              subcat.color
-            );
-          }
-        }
-      }
+  async clearCache() {
+    this.loader.clearCache();
+    try {
+      indexedDB.deleteDatabase('UrbanGreenTileCache');
+    } catch (e) {}
+    this.showToast("Cache cleared");
+    if (this.currentType && this.isLiveMode()) {
+      this.loadData();
     }
-
-    if (!hasColors) {
-      return this.colorForType(type);
-    }
-
-    expression.push(this.colorForType(type));
-    return expression;
   }
 }
 

@@ -10,30 +10,145 @@ const MAIN_TYPES = {
     name: "Vegetation",
     color: "#4CAF50",
     subcategories: {
-      "trees": { name: "Trees & Plants", subtypes: ["03"], geometries: ["Point"], icon: "ic-trees.svg", color: "#228B22" },
-      "hedges": { name: "Hedges", subtypes: ["03"], geometries: ["LineString"], icon: "hedge.svg", color: "#3CB371" },
-      "lawns": { name: "Lawns", subtypes: ["01"], icon: "lawn.svg", color: "#90EE90" },
-      "flowerbeds": { name: "Flowerbeds", subtypes: ["02"], icon: "flowerbed.svg", color: "#7CFC00" }
+      "greenAreas": {
+        name: "Green areas",
+        subtypes: ["01", "02"],
+        geometries: ["Polygon"],
+        icon: "lawn.svg",
+        color: "#90EE90",
+        minZoom: 13,
+        description: "General vegetation areas (lawns, flowerbeds)"
+      },
+      "lawns": {
+        name: "Lawns",
+        subtypes: ["01"],
+        geometries: ["Polygon"],
+        icon: "lawn.svg",
+        color: "#90EE90",
+        minZoom: 13
+      },
+      "flowerbeds": {
+        name: "Flowerbeds",
+        subtypes: ["02"],
+        geometries: ["Polygon"],
+        icon: "flowerbed.svg",
+        color: "#7CFC00",
+        minZoom: 13
+      },
+      "trees": {
+        name: "Trees & shrubs",
+        subtypes: ["03"],
+        geometries: ["Point"],
+        icon: "ic-trees.svg",
+        color: "#228B22",
+        minZoom: 15,
+        description: "Individual trees and shrubs"
+      },
+      "hedges": {
+        name: "Hedges",
+        subtypes: ["03"],
+        geometries: ["LineString"],
+        icon: "hedge.svg",
+        color: "#3CB371",
+        minZoom: 14
+      }
     }
   },
   "2": {
-    name: "Urban Furniture",
+    name: "Urban Furniture & Infrastructure",
     color: "#8D6E63",
     subcategories: {
-      "benches": { name: "Benches", subtypes: ["19"], icon: "bench.svg", color: "#A0522D" },
-      "bins": { name: "Waste bins", subtypes: ["24"], icon: "waste-bin.svg", color: "#696969" },
-      "bollards": { name: "Bollards", subtypes: ["14"], icon: "bollard.svg", color: "#FFD700" },
-      "fountains": { name: "Fountains / Hydrants", subtypes: ["22", "23"], icon: "fountain.svg", color: "#1E90FF" },
-      "shelters": { name: "Shelters & Canopies", subtypes: ["13"], icon: "canopy.svg", color: "#D2B48C" }
+      "pathsKerbsPaving": {
+        name: "Paths, kerbs & paving",
+        subtypes: ["16", "05", "41"],
+        geometries: ["LineString", "Polygon"],
+        icon: "bollard.svg",
+        color: "#696969",
+        minZoom: 14,
+        description: "Paths, kerbs and paved areas"
+      },
+      "furniture": {
+        name: "Urban furniture",
+        subtypes: ["19", "24", "14", "22", "23", "13"],
+        geometries: ["Point"],
+        icon: "bench.svg",
+        color: "#A0522D",
+        minZoom: 16,
+        description: "Benches, bins, bollards, fountains, shelters"
+      },
+      "benches": {
+        name: "Benches",
+        subtypes: ["19"],
+        geometries: ["Point"],
+        icon: "bench.svg",
+        color: "#A0522D",
+        minZoom: 16
+      },
+      "bins": {
+        name: "Waste bins",
+        subtypes: ["24"],
+        geometries: ["Point"],
+        icon: "waste-bin.svg",
+        color: "#696969",
+        minZoom: 16
+      },
+      "bollards": {
+        name: "Bollards",
+        subtypes: ["14"],
+        geometries: ["Point"],
+        icon: "bollard.svg",
+        color: "#FFD700",
+        minZoom: 16
+      },
+      "fountains": {
+        name: "Fountains / Hydrants",
+        subtypes: ["22", "23"],
+        geometries: ["Point"],
+        icon: "fountain.svg",
+        color: "#1E90FF",
+        minZoom: 16
+      },
+      "shelters": {
+        name: "Shelters & Canopies",
+        subtypes: ["13"],
+        geometries: ["Point"],
+        icon: "canopy.svg",
+        color: "#D2B48C",
+        minZoom: 16
+      }
     }
   },
   "3": {
     name: "Use & Management",
     color: "#2196F3",
     subcategories: {
-      "boundary": { name: "Green area boundary", subtypes: ["25"] },
-      "usage": { name: "Usage zones", subtypes: ["27"] },
-      "temporary": { name: "Temporary areas", subtypes: ["26"] }
+      "managementAreas": {
+        name: "Management areas",
+        subtypes: ["25"],
+        geometries: ["Polygon"],
+        icon: "lawn.svg",
+        color: "#2196F3",
+        minZoom: 12,
+        description: "Green area management zones"
+      },
+      "boundary": {
+        name: "Green area boundary",
+        subtypes: ["25"],
+        geometries: ["Polygon"],
+        minZoom: 12
+      },
+      "usage": {
+        name: "Usage zones",
+        subtypes: ["27"],
+        geometries: ["Polygon"],
+        minZoom: 13
+      },
+      "temporary": {
+        name: "Temporary areas",
+        subtypes: ["26"],
+        geometries: ["Polygon"],
+        minZoom: 13
+      }
     }
   }
 };

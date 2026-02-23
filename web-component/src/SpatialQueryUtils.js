@@ -1,4 +1,3 @@
-
 export function bboxToPolygon(bounds) {
   const w = bounds.getWest();
   const s = bounds.getSouth();
@@ -21,7 +20,6 @@ export function buildPolygonQuery(bounds, options = {}) {
   if (options.srid) polygon += `;SRID=${options.srid}`;
   return { polygon };
 }
-
 
 export function calculateRadiusFromBounds(bounds) {
   const c = bounds.getCenter();
@@ -59,21 +57,18 @@ export function shrinkBounds(bounds, zoom) {
   };
 }
 
-
 export function getLayersForZoom(zoom, userSelectedType) {
   if (userSelectedType) return [userSelectedType];
-
-  if (zoom <= 10) return ['3'];           
-  if (zoom <= 12) return ['3', '1'];      
-  if (zoom <= 14) return ['3', '1', '2']; 
-  return ['1', '2', '3'];                 
+  if (zoom <= 10) return ['3'];
+  if (zoom <= 12) return ['3', '1'];
+  if (zoom <= 14) return ['3', '1', '2'];
+  return ['1', '2', '3'];
 }
 
 export function chooseSpatialStrategy(greenCodeType, zoom, bounds) {
   const center = bounds.getCenter();
   const shrunk = shrinkBounds(bounds, zoom);
   const radius = calculateRadiusFromBounds(bounds);
-
 
   if (zoom <= 10) {
     return {
@@ -95,8 +90,16 @@ export function chooseSpatialStrategy(greenCodeType, zoom, bounds) {
   };
 }
 
+/**
+ * 
+ */
+export function getGeometryStrategy(zoom, greenCodeType) {
 
-export function getGeometryStrategy(zoom) {
+  // Always full geometry for vegetation + management
+  if (greenCodeType === "1" || greenCodeType === "3") {
+    return { includeFullGeometry: true, simplificationTolerance: 0.0005 };
+  }
+
   if (zoom <= 11) {
     return { includeFullGeometry: false, simplificationTolerance: 0.001 };
   }
@@ -106,10 +109,13 @@ export function getGeometryStrategy(zoom) {
   if (zoom <= 15) {
     return { includeFullGeometry: true, simplificationTolerance: 0.0001 };
   }
+
   return { includeFullGeometry: true, simplificationTolerance: 0.00005 };
 }
 
-
+/**
+ * ✅ FIXED: geometry mode included in cache key properly
+ */
 export function getTileKey(bounds, zoom, layerType = 'all') {
   const c = bounds.getCenter();
   const z = Math.floor(zoom);
@@ -120,8 +126,12 @@ export function getTileKey(bounds, zoom, layerType = 'all') {
     (1 - Math.log(Math.tan(c.lat * Math.PI / 180) + 1 / Math.cos(c.lat * Math.PI / 180)) / Math.PI) / 2 * n
   );
 
+  const geoMode =
+    (layerType === '1' || layerType === '3' || zoom > 11)
+      ? 'full'
+      : 'centroid';
 
-  return `urbangreen:v2:${z}:${x}:${y}:${layerType}`;
+  return `urbangreen:v2:${z}:${x}:${y}:${layerType}:${geoMode}`;
 }
 
 export function buildAPIUrl(baseEndpoint, spatialParams, options = {}) {
@@ -133,29 +143,19 @@ export function buildAPIUrl(baseEndpoint, spatialParams, options = {}) {
 
   if (options.pagesize) url.searchParams.set('pagesize', options.pagesize);
   if (options.pagenumber) url.searchParams.set('pagenumber', options.pagenumber);
-
-
   if (options.greenCodeType) url.searchParams.set('type', options.greenCodeType);
   if (options.activeOnly) url.searchParams.set('active', 'true');
 
-  const lang = options.language || 'en';
-
   url.searchParams.append('fields', 'Id');
-  url.searchParams.append('fields', 'Active');
-  url.searchParams.append('fields', 'GreenCode');
   url.searchParams.append('fields', 'GreenCodeType');
   url.searchParams.append('fields', 'GreenCodeSubtype');
-  url.searchParams.append('fields', 'Shortname');
   url.searchParams.append('fields', 'Geo');
-  url.searchParams.append('fields', `Detail.${lang}`);
-
 
   url.searchParams.set('removenullvalues', 'false');
   url.searchParams.set('getasidarray', 'false');
 
   return url.toString();
 }
-
 
 export function getOptimalPageSize(zoom) {
   if (zoom <= 10) return 100;
